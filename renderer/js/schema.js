@@ -295,10 +295,9 @@
         const rows = t.columns
           .map(
             (c) => `<tr>
-              <td class="tc-name ${c.pk ? 'is-pk' : ''}">${esc(c.name)}</td>
+              <td class="tc-name"><span class="${c.pk ? 'is-pk' : ''}">${esc(c.name)}</span>${c.fk ? `<div class="tc-ref">→&nbsp;${esc(c.fk.table)}.<wbr>${esc(c.fk.column)}</div>` : ''}</td>
               <td class="tc-type">${esc(c.type || '–')}</td>
-              <td class="tc-keys">${c.pk ? '<span class="k pk">PK</span>' : ''}${c.fk ? '<span class="k fk">FK</span>' : ''}${c.unique ? '<span class="k uq">UQ</span>' : ''}</td>
-              <td class="tc-ref">${c.fk ? `→ ${esc(c.fk.table)}.${esc(c.fk.column)}` : c.nullable ? '' : '<span class="nn">NOT NULL</span>'}</td>
+              <td class="tc-keys">${c.pk ? '<span class="k pk">PK</span>' : ''}${c.fk ? '<span class="k fk">FK</span>' : ''}${c.unique ? '<span class="k uq">UQ</span>' : ''}${c.nullable || c.pk ? '' : '<span class="nn">NOT NULL</span>'}</td>
             </tr>`
           )
           .join('');
@@ -321,18 +320,19 @@
     .tt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
     .tt-head b { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
     .tt-tag { font-size: 10.5px; font-weight: 700; color: #7b4ddb; background: #f1eaff; border-radius: 999px; padding: 2px 8px; }
-    .ttable table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-    .ttable td { padding: 6px 4px; border-top: 1px solid #f0f0f3; vertical-align: middle; }
-    .tc-name { font-weight: 600; }
-    .tc-name.is-pk { text-decoration: underline; text-underline-offset: 3px; }
-    .tc-type { color: #8e8e93; font-size: 11.5px; }
-    .tc-keys { white-space: nowrap; width: 1%; }
-    .tc-ref { color: #3d6be0; font-size: 11.5px; text-align: right; white-space: nowrap; }
+    .ttable { min-width: 0; }
+    .ttable table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: auto; }
+    .ttable td { padding: 6px 4px; border-top: 1px solid #f0f0f3; vertical-align: top; }
+    .tc-name { font-weight: 600; overflow-wrap: anywhere; }
+    .tc-name .is-pk { text-decoration: underline; text-underline-offset: 3px; }
+    .tc-type { color: #8e8e93; font-size: 11.5px; white-space: nowrap; width: 1%; padding-right: 10px; }
+    .tc-keys { white-space: nowrap; width: 1%; text-align: right; }
+    .tc-ref { color: #3d6be0; font-size: 11px; font-weight: 500; margin-top: 2px; overflow-wrap: anywhere; }
     .k { display: inline-block; font-size: 10px; font-weight: 800; border-radius: 5px; padding: 1px 5px; margin-right: 3px; }
     .k.pk { background: #ffe9e5; color: #e5402f; }
     .k.fk { background: #e9f0ff; color: #3d6be0; }
     .k.uq { background: #e6f8ec; color: #2ba85a; }
-    .nn { color: #b8b8bd; font-size: 10.5px; font-weight: 700; }
+    .nn { color: #b8b8bd; font-size: 9.5px; font-weight: 700; margin-left: 2px; }
     .tt-schema { margin-top: 8px; font-size: 11.5px; color: #3a3a40; background: #f4f4f6; border-radius: 9px; padding: 7px 10px; line-height: 1.5; word-break: break-word; }
     .tt-schema u { text-underline-offset: 2px; }
     .tt-schema sup { color: #3d6be0; font-size: 9px; }

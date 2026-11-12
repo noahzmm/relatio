@@ -49,8 +49,8 @@ Lade im [neuesten Release](https://github.com/noahzmm/relatio/releases/latest) e
 
 | Datei | Beschreibung |
 | --- | --- |
-| `Relatio-Setup-1.3.0.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
-| `Relatio-1.3.0-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
+| `Relatio-Setup-1.3.1.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
+| `Relatio-1.3.1-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
 
 > Die Builds sind nicht signiert. Windows SmartScreen zeigt beim ersten Start einen Hinweis – über **Weitere Informationen → Trotzdem ausführen** startet die App.
 
