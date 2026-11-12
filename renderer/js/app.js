@@ -271,6 +271,13 @@
   const entity = (id) => E.p.entities.find((e) => e.id === id);
   const relation = (id) => E.p.relationships.find((r) => r.id === id);
   const generalization = (id) => E.p.generalizations.find((g) => g.id === id);
+  // Attribute gehören zu einer Entität oder einer Beziehung
+  const owner = (id) => {
+    const o = entity(id) || relation(id);
+    if (o && !o.attributes) o.attributes = [];
+    return o;
+  };
+  const ownerSel = (id) => ({ kind: entity(id) ? 'entity' : 'rel', id });
   const PICK_TOOLS = ['rel', 'gen']; // Werkzeuge, die zwei Entitäten nacheinander anklicken
 
   async function openProject(idOrProject) {
@@ -537,7 +544,7 @@
     if (ev.button !== 0) return;
     if (E.tool === 'entity') return addEntity(w.x, w.y);
     if (PICK_TOOLS.includes(E.tool)) {
-      if (hit && (hit.kind === 'entity' || hit.kind === 'attr')) {
+      if (hit && (hit.kind === 'entity' || hit.kind === 'attr') && entity(hit.id)) {
         if (!E.relFrom) {
           E.relFrom = hit.id;
           E.pointer = w;
@@ -551,9 +558,18 @@
     cv.setPointerCapture(ev.pointerId);
     if (hit) {
       const prev = JSON.stringify(E.sel);
-      E.sel = hit.kind === 'attr' ? { kind: 'attr', id: hit.id, attr: hit.attr } : { kind: hit.kind, id: hit.id };
+      E.sel = hit.kind === 'attr' ? { kind: 'attr', id: hit.id, attr: hit.attr } : { kind: hit.kind === 'rbox' ? 'rel' : hit.kind, id: hit.id };
       const L = R.layout(E.p);
-      if (hit.kind === 'entity' || (hit.kind === 'attr' && !L.chen)) {
+      const relAttr = hit.kind === 'rbox' || (hit.kind === 'attr' && !entity(hit.id));
+      if (relAttr && !L.chen) {
+        // Attributkasten einer Beziehung verschieben
+        const r = relation(hit.id);
+        E.drag = { kind: 'rbox', id: hit.id, start: w, orig: { x: r.bdx || 0, y: r.bdy || 0 }, moved: false };
+      } else if (relAttr) {
+        const lr = L.rels.find((r) => r.rel.id === hit.id);
+        const ag = (L.attrGeoms.get(hit.id) || []).find((x) => x.a.id === hit.attr);
+        E.drag = lr && ag ? { kind: 'attr', id: hit.id, attr: hit.attr, start: w, orig: { x: ag.cx - lr.d.cx, y: ag.cy - lr.d.cy }, moved: false } : null;
+      } else if (hit.kind === 'entity' || (hit.kind === 'attr' && !L.chen)) {
         const e = entity(hit.id);
         E.drag = { kind: 'entity', id: hit.id, start: w, orig: { x: e.x, y: e.y }, moved: false };
       } else if (hit.kind === 'attr') {
@@ -585,7 +601,7 @@
     if (!d && PICK_TOOLS.includes(E.tool)) {
       E.pointer = toWorld(ev);
       const hit = hitOf(ev);
-      const hov = hit && (hit.kind === 'entity' || hit.kind === 'attr') ? hit.id : null;
+      const hov = hit && (hit.kind === 'entity' || hit.kind === 'attr') && entity(hit.id) ? hit.id : null;
       if (E.relFrom || hov !== E.hover) {
         E.hover = hov;
         renderCanvas();
@@ -618,8 +634,12 @@
       const g = generalization(d.id);
       g.x = snapV(d.orig.x + dx);
       g.y = snapV(d.orig.y + dy);
+    } else if (d.kind === 'rbox') {
+      const r = relation(d.id);
+      r.bdx = Math.round(d.orig.x + dx);
+      r.bdy = Math.round(d.orig.y + dy);
     } else if (d.kind === 'attr') {
-      const a = entity(d.id).attributes.find((x) => x.id === d.attr);
+      const a = owner(d.id).attributes.find((x) => x.id === d.attr);
       a.dx = Math.round(d.orig.x + dx);
       a.dy = Math.round(d.orig.y + dy);
     }
@@ -645,7 +665,7 @@
       return addEntity(w.x, w.y);
     }
     if (hit.kind === 'gen') return;
-    const target = hit.kind === 'rel' ? '#f-rname' : hit.kind === 'attr' ? `.attr-row[data-attr="${hit.attr}"] input` : '#f-ename';
+    const target = hit.kind === 'rel' || hit.kind === 'rbox' ? '#f-rname' : hit.kind === 'attr' ? `.attr-row[data-attr="${hit.attr}"] input` : '#f-ename';
     const el = $(target);
     if (el) {
       el.focus();
@@ -668,7 +688,7 @@
     const prevNotation = E.p.notation;
     Object.assign(E.p, JSON.parse(s));
     if (E.sel && !entity(E.sel.id) && !relation(E.sel.id)) E.sel = null;
-    if (E.sel && E.sel.kind === 'attr' && !(entity(E.sel.id).attributes || []).some((a) => a.id === E.sel.attr)) E.sel = { kind: 'entity', id: E.sel.id };
+    if (E.sel && E.sel.kind === 'attr' && !(owner(E.sel.id).attributes || []).some((a) => a.id === E.sel.attr)) E.sel = ownerSel(E.sel.id);
     changed();
     if (prevNotation !== E.p.notation) return showEditor(false);
     $('#ed-name').textContent = E.p.name;
@@ -804,9 +824,9 @@
       E.p.generalizations = E.p.generalizations.filter((g) => g.id !== s.id);
       E.sel = null;
     } else if (s.kind === 'attr') {
-      const e = entity(s.id);
+      const e = owner(s.id);
       e.attributes = e.attributes.filter((a) => a.id !== s.attr);
-      E.sel = { kind: 'entity', id: s.id };
+      E.sel = ownerSel(s.id);
     } else if (s.kind === 'rel') {
       E.p.relationships = E.p.relationships.filter((r) => r.id !== s.id);
       E.sel = null;
@@ -832,7 +852,7 @@
     if (!panel) return;
     const s = E.sel;
     if (s && (s.kind === 'entity' || s.kind === 'attr') && entity(s.id)) panel.innerHTML = panelEntity(entity(s.id));
-    else if (s && s.kind === 'rel' && relation(s.id)) panel.innerHTML = panelRel(relation(s.id));
+    else if (s && (s.kind === 'rel' || s.kind === 'attr') && relation(s.id)) panel.innerHTML = panelRel(relation(s.id));
     else if (s && s.kind === 'gen' && generalization(s.id)) panel.innerHTML = panelGen(generalization(s.id));
     else panel.innerHTML = panelProject();
   }
@@ -866,18 +886,23 @@
       ${R.isDesktop ? `<button class="btn btn-light btn-sm" data-act="export-file" style="margin-top:22px;width:100%;justify-content:center">${I.download} Als Datei sichern</button>` : ''}`;
   }
 
-  function panelEntity(e) {
+  function attrRows(o, { pk = true, pkTitle = 'Primärschlüssel' } = {}) {
     const chen = R.isChen(E.p.notation);
-    const rows = (e.attributes || [])
+    return (o.attributes || [])
       .map(
         (a) => `<div class="attr-row ${E.sel.kind === 'attr' && E.sel.attr === a.id ? 'selected' : ''}" data-attr="${esc(a.id)}">
-          <button class="mini-btn pk ${a.pk ? 'on' : ''}" data-act="pk" title="Primärschlüssel">${I.key}</button>
+          ${pk ? `<button class="mini-btn pk ${a.pk ? 'on' : ''}" data-act="pk" title="${pkTitle}">${I.key}</button>` : ''}
           <input data-af="name" value="${esc(a.name)}" placeholder="Attributname" maxlength="60" />
           ${chen ? '' : `<input class="type" data-af="type" value="${esc(a.type)}" placeholder="Typ" maxlength="30" />`}
           <button class="mini-btn del" data-act="del-attr" title="Attribut entfernen">${I.x}</button>
         </div>`
       )
       .join('');
+  }
+
+  function panelEntity(e) {
+    const chen = R.isChen(E.p.notation);
+    const rows = attrRows(e);
     const moved = chen && (e.attributes || []).some((a) => typeof a.dx === 'number');
     return `
       <div class="panel-head"><h4>Entität</h4><span class="pill">${(e.attributes || []).length} Attribute</span></div>
@@ -913,6 +938,18 @@
       <div class="card-box"><div class="q">Wie viele <b>${esc(B.name)}</b> gehören zu einer Instanz von <b>${esc(A.name)}</b>?</div><select data-f="cto">${opts(r.cardTo)}</select></div>
       <button class="link-btn" data-act="swap">${I.swap} Richtung tauschen</button>
       ${R.isChen(nt) && typeof r.x === 'number' ? `<button class="link-btn" data-act="center-rel">${I.layout} Raute mittig setzen</button>` : ''}
+      <div class="sub-head"><div class="label">Attribute</div><button class="link-btn" data-act="add-attr">${I.plus} Attribut</button></div>
+      <div>${attrRows(r, { pk: ratio === 'N:M', pkTitle: 'Teil des Schlüssels der Verknüpfungstabelle' }) || '<p class="hint">Keine Attribute – z. B. Menge oder Datum der Beziehung.</p>'}</div>
+      ${
+        (r.attributes || []).length
+          ? `<p class="hint">${
+              ratio === 'N:M'
+                ? 'Landen in der Verknüpfungstabelle. Der Schlüssel macht ein Attribut zum Teil ihres Primärschlüssels.'
+                : 'Landen in der Tabelle, die den Fremdschlüssel trägt.'
+            }</p>`
+          : ''
+      }
+      ${(r.attributes || []).some((a) => typeof a.dx === 'number') || typeof r.bdx === 'number' ? `<button class="link-btn" data-act="reset-attrs">${I.layout} Attribute automatisch anordnen</button>` : ''}
       <button class="btn danger-btn btn-sm" data-act="del-rel">${I.trash} Beziehung löschen</button>`;
   }
 
@@ -968,7 +1005,7 @@
     else if (f === 'ename') entity(E.sel.id).name = t.value;
     else if (f === 'rname') relation(E.sel.id).name = t.value;
     else if (af) {
-      const a = entity(E.sel.id).attributes.find((x) => x.id === t.closest('.attr-row').dataset.attr);
+      const a = owner(E.sel.id).attributes.find((x) => x.id === t.closest('.attr-row').dataset.attr);
       a[af] = t.value;
     } else return;
     renderCanvas();
@@ -1028,17 +1065,20 @@
     let focus = null;
     if (act === 'add-attr') {
       const a = { id: R.uid(), name: '', pk: false, type: '' };
-      entity(s.id).attributes.push(a);
+      owner(s.id).attributes.push(a);
       focus = `.attr-row[data-attr="${a.id}"] input`;
     } else if (act === 'pk') {
-      const a = entity(s.id).attributes.find((x) => x.id === row.dataset.attr);
+      const a = owner(s.id).attributes.find((x) => x.id === row.dataset.attr);
       a.pk = !a.pk;
     } else if (act === 'del-attr') {
-      const e = entity(s.id);
+      const e = owner(s.id);
       e.attributes = e.attributes.filter((x) => x.id !== row.dataset.attr);
-      if (s.kind === 'attr' && s.attr === row.dataset.attr) E.sel = { kind: 'entity', id: s.id };
+      if (s.kind === 'attr' && s.attr === row.dataset.attr) E.sel = ownerSel(s.id);
     } else if (act === 'reset-attrs') {
-      entity(s.id).attributes.forEach((a) => {
+      const o = owner(s.id);
+      delete o.bdx;
+      delete o.bdy;
+      o.attributes.forEach((a) => {
         delete a.dx;
         delete a.dy;
       });

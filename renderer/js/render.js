@@ -50,11 +50,11 @@
     return { x: e.x, y: e.y, w, h, cx: e.x + w / 2, cy: e.y + h / 2, headH, rowH, pad, hasPk };
   }
 
-  function chenAttrGeoms(e, g) {
+  function chenAttrGeoms(e, g, ring = { x: 100, y: 62 }) {
     const attrs = e.attributes || [];
     const n = attrs.length;
-    const rx = g.w / 2 + 100;
-    const ry = g.h / 2 + 62;
+    const rx = g.w / 2 + ring.x;
+    const ry = g.h / 2 + ring.y;
     const step = n <= 1 ? 0 : Math.min(40, 320 / n);
     return attrs.map((a, i) => {
       const w = Math.max(84, Math.ceil(tw(a.name || '—', 13, a.pk ? 700 : 500) + 38));
@@ -176,6 +176,7 @@
         ends.push(mk(A, r.cardFrom, r.cardTo, true, self ? -16 : 0));
         ends.push(mk(B, r.cardTo, r.cardFrom, false, self ? 16 : 0));
         rels.push({ rel: r, kind: 'chen', d, ends });
+        if ((r.attributes || []).length) attrGeoms.set(r.id, chenAttrGeoms(r, d, { x: 40, y: 46 }));
       } else {
         let pts;
         if (self) {
@@ -215,7 +216,18 @@
         let mid;
         if (self) mid = { x: (pts[1].x + pts[2].x) / 2, y: pts[1].y - 12 };
         else mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
-        rels.push({ rel: r, kind: 'box', pts, ends, mid, self });
+        // Attribute der Beziehung: eigener Kasten, gestrichelt an der Linie (wie UML-Assoziationsklasse)
+        let abox = null;
+        if ((r.attributes || []).length) {
+          const fake = { name: r.name || 'Attribute', x: 0, y: 0, attributes: r.attributes };
+          const g0 = entityGeom(fake, notation);
+          const dir = self ? { x: 0, y: -1 } : perpUp(unit(pts[1].x - pts[0].x, pts[1].y - pts[0].y));
+          const dist = 46 + (Math.abs(dir.y) * g0.h) / 2 + (Math.abs(dir.x) * g0.w) / 2;
+          const cx = mid.x + dir.x * dist + (r.bdx || 0);
+          const cy = mid.y + dir.y * dist + (r.bdy || 0);
+          abox = entityGeom({ ...fake, x: Math.round(cx - g0.w / 2), y: Math.round(cy - g0.h / 2) }, notation);
+        }
+        rels.push({ rel: r, kind: 'box', pts, ends, mid, self, abox });
       }
     }
 
@@ -263,6 +275,7 @@
         }
       }
       for (const e of r.ends) grow(e.p.x - 40, e.p.y - 26, e.p.x + 40, e.p.y + 26);
+      if (r.abox) grow(r.abox.x, r.abox.y, r.abox.x + r.abox.w, r.abox.y + r.abox.h);
     }
     for (const g of gens) grow(g.hub.x - 60, g.hub.y - 40, g.hub.x + 60, g.hub.y + 40);
     const bbox = Number.isFinite(bb.minX) ? bb : null;
@@ -352,6 +365,10 @@
         }
         relLines.push(`<g data-kind="rel" data-id="${esc(r.rel.id)}">${ls}</g>`);
         const d = r.d;
+        for (const ag of attrGeoms.get(r.rel.id) || []) {
+          attrLines.push(line(clipDiamond(d, ag.cx, ag.cy), clipEllipse(ag, d.cx, d.cy), { width: 1.4 }));
+          attrNodes.push(chenAttrNode(r.rel.id, ag, isSelAttr(r.rel.id, ag.a.id)));
+        }
         diamonds.push(
           `<g data-kind="rel" data-id="${esc(r.rel.id)}" class="node">` +
             `<path class="body" d="M${n1(d.cx)},${n1(d.cy - d.h / 2)} L${n1(d.cx + d.w / 2)},${n1(d.cy)} L${n1(d.cx)},${n1(
@@ -379,7 +396,24 @@
           }
         }
         relLines.push(`<g data-kind="rel" data-id="${esc(r.rel.id)}">${ls}</g>`);
-        if (r.rel.name) {
+        if (r.abox) {
+          const g = r.abox;
+          const id = esc(r.rel.id);
+          const fake = { id: r.rel.id, attributes: r.rel.attributes };
+          const p = clipRect(g, r.mid.x, r.mid.y);
+          relLines.push(line(r.mid, p, { stroke, width: 1.4, extra: 'stroke-dasharray="5 4"' }));
+          let s = `<g data-kind="rbox" data-id="${id}" class="node">`;
+          s += `<rect class="body" x="${n1(g.x)}" y="${n1(g.y)}" width="${g.w}" height="${g.h}" rx="${notation === 'crow' ? 12 : 2}" fill="#fff"/>`;
+          s += `<rect x="${n1(g.x)}" y="${n1(g.y)}" width="${g.w}" height="${g.headH}" rx="${notation === 'crow' ? 12 : 2}" fill="#F3F3F5"/>`;
+          s += `<rect x="${n1(g.x)}" y="${n1(g.y + g.headH - 12)}" width="${g.w}" height="12" fill="#F3F3F5"/>`;
+          s += line({ x: g.x, y: g.y + g.headH }, { x: g.x + g.w, y: g.y + g.headH }, { width: 1.2, stroke: INK2 });
+          s += text(g.cx, g.y + g.headH / 2, r.rel.name || 'Attribute', { size: 14, weight: 700, fill: INK2, italic: !r.rel.name });
+          s += '</g>';
+          s += boxRows(fake, g, notation, isSelAttr);
+          s += `<rect x="${n1(g.x)}" y="${n1(g.y)}" width="${g.w}" height="${g.h}" rx="${notation === 'crow' ? 12 : 2}" fill="none" stroke="${stroke}" stroke-width="1.4" pointer-events="none"/>`;
+          diamonds.push(s);
+        }
+        if (r.rel.name && !r.abox) {
           labels.push(
             `<g data-kind="rel" data-id="${esc(r.rel.id)}">` +
               text(r.mid.x, r.mid.y, r.rel.name, { size: 12.5, weight: 600, fill: selected ? ACCENT : INK2, halo: true, italic: notation === 'uml' }) +
@@ -490,18 +524,7 @@
           const p = clipRect(g, ag.cx, ag.cy);
           const q = clipEllipse(ag, g.cx, g.cy);
           attrLines.push(line(p, q, { width: 1.4 }));
-          const aSel = isSelAttr(e.id, ag.a.id);
-          let a = `<g data-kind="attr" data-id="${esc(e.id)}" data-attr="${esc(ag.a.id)}" class="node">`;
-          a += `<ellipse class="body" cx="${n1(ag.cx)}" cy="${n1(ag.cy)}" rx="${ag.w / 2}" ry="${ag.h / 2}" fill="#fff" stroke="${
-            aSel ? ACCENT : INK
-          }" stroke-width="${aSel ? 2 : 1.5}"/>`;
-          a += text(ag.cx, ag.cy, ag.a.name || '—', { size: 13, weight: ag.a.pk ? 700 : 500 });
-          if (ag.a.pk) {
-            const hw = tw(ag.a.name || '—', 13, 700) / 2;
-            a += line({ x: ag.cx - hw, y: ag.cy + 9 }, { x: ag.cx + hw, y: ag.cy + 9 }, { width: 1.3 });
-          }
-          a += '</g>';
-          attrNodes.push(a);
+          attrNodes.push(chenAttrNode(e.id, ag, isSelAttr(e.id, ag.a.id)));
         }
       }
     }
@@ -526,6 +549,19 @@
       `</g>`;
     return { svg, bbox: L.bbox, layout: L };
   };
+
+  function chenAttrNode(ownerId, ag, aSel) {
+    let a = `<g data-kind="attr" data-id="${esc(ownerId)}" data-attr="${esc(ag.a.id)}" class="node">`;
+    a += `<ellipse class="body" cx="${n1(ag.cx)}" cy="${n1(ag.cy)}" rx="${ag.w / 2}" ry="${ag.h / 2}" fill="#fff" stroke="${aSel ? ACCENT : INK}" stroke-width="${
+      aSel ? 2 : 1.5
+    }"/>`;
+    a += text(ag.cx, ag.cy, ag.a.name || '—', { size: 13, weight: ag.a.pk ? 700 : 500 });
+    if (ag.a.pk) {
+      const hw = tw(ag.a.name || '—', 13, 700) / 2;
+      a += line({ x: ag.cx - hw, y: ag.cy + 9 }, { x: ag.cx + hw, y: ag.cy + 9 }, { width: 1.3 });
+    }
+    return a + '</g>';
+  }
 
   function boxRows(e, g, notation, isSelAttr) {
     const attrs = e.attributes || [];

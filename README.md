@@ -22,6 +22,7 @@
 - **Notation pro Projekt** – beim Anlegen wählst du zwischen **Chen**, **(min,max)**, **Crow's Foot** und **UML** (mit Live-Vorschau). Umschalten ist später jederzeit möglich, das Diagramm wird automatisch neu gezeichnet.
 - **Schnell zeichnen** – Entitäten mit Doppelklick oder <kbd>E</kbd>, Beziehungen mit <kbd>R</kbd> und zwei Klicks, alles per Drag & Drop verschiebbar.
 - **Attribute & Schlüssel** – Attribute mit Datentyp, Primärschlüssel per Klick; in Chen als Ellipsen (frei verschiebbar), in Crow's Foot/UML als Liste.
+- **Attribute an Beziehungen** – z. B. Menge oder Datum direkt an der Beziehung: in Chen als Ellipsen an der Raute, in Crow's Foot/UML als Kasten an der Linie (wie eine Assoziationsklasse). In den Tabellen landen sie in der Verknüpfungstabelle bzw. bei der Fremdschlüssel-Seite.
 - **Kardinalitäten ohne Rätselraten** – Presets 1:1 · 1:N · N:M oder pro Ende „genau eine / keine oder eine / eine oder mehrere / beliebig viele“. Die Darstellung passt sich der Notation an (1/N/M, (0,n), Krähenfuß, 0..*).
 - **Generalisierung (IS-A)** – mit <kbd>G</kbd> Obertyp und Untertypen verbinden, total/partiell und disjunkt/überlappend festlegen. Chen zeigt das IS-A-Dreieck, Crow's Foot/UML den Vererbungspfeil.
 - **Tabellen-Ansicht** – mit <kbd>T</kbd> wird das Diagramm automatisch ins Relationenmodell übersetzt: Primär- und Fremdschlüssel, Verknüpfungstabellen für N:M, schwache Entitäten und drei Abbildungen für Generalisierungen (Tabelle je Typ, eine Tabelle, nur Untertypen).
@@ -47,8 +48,8 @@ Lade im [neuesten Release](https://github.com/noahzmm/relatio/releases/latest) e
 
 | Datei | Beschreibung |
 | --- | --- |
-| `Relatio-Setup-1.1.0.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
-| `Relatio-1.1.0-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
+| `Relatio-Setup-1.2.0.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
+| `Relatio-1.2.0-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
 
 > Die Builds sind nicht signiert. Windows SmartScreen zeigt beim ersten Start einen Hinweis – über **Weitere Informationen → Trotzdem ausführen** startet die App.
 

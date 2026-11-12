@@ -107,6 +107,16 @@
       else child.columns.push(...cols);
     }
 
+    // Attribute einer Beziehung an die Tabelle hängen, die die Beziehung trägt
+    function addRelAttrs(t, rel, { keys = false, nullable = false } = {}) {
+      for (const a of rel.attributes || []) {
+        const name = clean(a.name);
+        if (!name) continue;
+        const pk = keys && !!a.pk;
+        t.columns.push({ name: uniqueName(name.replace(/\s+/g, '_'), t._taken), type: clean(a.type), pk, fk: null, nullable: !pk && nullable, unique: false });
+      }
+    }
+
     for (const e of ents) finalize(e.id);
 
     // "Eine Tabelle": Untertypen in den Obertyp einfalten
@@ -168,8 +178,16 @@
         // Beziehung zu einem aufgelösten Obertyp: nur möglich, wenn der Obertyp den Fremdschlüssel trägt
         const aMany = r.cardFrom.max === 'N';
         const bMany = r.cardTo.max === 'N';
-        if (Bs.length > 1 && As.length === 1 && bMany && !aMany) Bs.forEach((B) => addFk(B, As[0], r, { nullable: r.cardFrom.min !== 1 }));
-        else if (As.length > 1 && Bs.length === 1 && aMany && !bMany) As.forEach((A) => addFk(A, Bs[0], r, { nullable: r.cardTo.min !== 1 }));
+        if (Bs.length > 1 && As.length === 1 && bMany && !aMany)
+          Bs.forEach((B) => {
+            addFk(B, As[0], r, { nullable: r.cardFrom.min !== 1 });
+            addRelAttrs(B, r, { nullable: true });
+          });
+        else if (As.length > 1 && Bs.length === 1 && aMany && !bMany)
+          As.forEach((A) => {
+            addFk(A, Bs[0], r, { nullable: r.cardTo.min !== 1 });
+            addRelAttrs(A, r, { nullable: true });
+          });
         else [...As, ...Bs].forEach((t) => t.notes.push(`Beziehung „${clean(r.name) || 'ohne Namen'}“ verweist auf einen aufgelösten Obertyp und wurde nicht abgebildet.`));
         continue;
       }
@@ -189,6 +207,7 @@
         const self = A === B;
         addFk(t, A, r, { asPk: true, role: self ? 'von' : '' });
         addFk(t, B, r, { asPk: true, role: self ? 'zu' : '' });
+        addRelAttrs(t, r, { keys: true, nullable: true });
         tables.push(t);
         continue;
       }
@@ -201,6 +220,9 @@
       // steckt der Untertyp in der Tabelle des Obertyps, muss der Fremdschlüssel leer sein dürfen
       const folded = alias.has(child === A ? r.from : r.to);
       addFk(child, parent, r, { nullable: folded || parentCard.min !== 1, unique: !aMany && !bMany, asPk: child.weak && !parent.weak && !folded });
+      // bei optionaler Teilnahme kann der Wert fehlen
+      addRelAttrs(child, r, { nullable: folded || parentCard.min !== 1 });
+      if ((r.attributes || []).some((a) => a.pk && clean(a.name))) child.notes.push(`Schlüssel an Attributen von „${clean(r.name) || 'Beziehung'}“ gelten nur bei N:M.`);
     }
 
     for (const t of tables) {
