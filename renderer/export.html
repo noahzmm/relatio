@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="fonts.css" />
+  <style id="page-style"></style>
+  <style>
+    html, body { margin: 0; padding: 0; background: #fff; }
+    .page { box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif; color: #141416; }
+    .head { display: flex; align-items: flex-end; justify-content: space-between; padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1.5px solid #141416; }
+    .title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+    .sub { font-size: 12px; color: #8E8E93; margin-top: 4px; font-weight: 500; }
+    .brand { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; }
+    .brand i { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: #141416; color: #fff; font-style: normal; font-size: 12px; font-weight: 800; }
+    .art { flex: 1; min-height: 0; display: flex; }
+    .art svg { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div class="page" id="page"></div>
+  <script>
+    const SIZES = { 'a4-landscape': [1123, 794], 'a4-portrait': [794, 1123], 'a3-landscape': [1587, 1123], 'a3-portrait': [1123, 1587] };
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+    window.renderExport = async function (o) {
+      const pad = 48;
+      const headH = o.header ? 76 : 0;
+      let [w, h] = SIZES[o.format] || [0, 0];
+      if (!w) {
+        w = Math.ceil(o.width + pad * 2);
+        h = Math.ceil(o.height + pad * 2 + headH);
+      }
+      document.getElementById('page-style').textContent = `@page { size: ${w}px ${h}px; margin: 0 }`;
+      const page = document.getElementById('page');
+      page.style.width = w + 'px';
+      page.style.height = h - 1 + 'px';
+      page.style.padding = pad + 'px';
+      page.innerHTML =
+        (o.header
+          ? `<div class="head"><div><div class="title">${esc(o.title)}</div><div class="sub">${esc(o.subtitle)}</div></div><div class="brand"><i>R</i>Relatio</div></div>`
+          : '') + `<div class="art">${o.svg}</div>`;
+      const svg = page.querySelector('svg');
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      // kleine Diagramme nicht übermäßig aufblasen
+      svg.style.maxWidth = o.width * 1.5 + 'px';
+      svg.style.maxHeight = o.height * 1.5 + 'px';
+      svg.style.margin = 'auto';
+      await Promise.all(['400', '500', '600', '700', '800'].map((wt) => document.fonts.load(`${wt} 14px "Plus Jakarta Sans"`).catch(() => {})));
+      await document.fonts.ready;
+      return { width: w, height: h };
+    };
+  </script>
+</body>
+</html>

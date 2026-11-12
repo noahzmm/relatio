@@ -1,0 +1,50 @@
+{
+  "name": "relatio",
+  "productName": "Relatio",
+  "version": "1.0.0",
+  "description": "ER-Diagramme einfach zeichnen – Chen, (min,max), Crow's Foot und UML, mit PDF-Export.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron scripts/smoke.js smoke-output",
+    "dist": "npx --yes electron-builder@26.0.12 --win nsis portable"
+  },
+  "license": "MIT",
+  "author": "noahzmm",
+  "homepage": "https://github.com/noahzmm/relatio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/noahzmm/relatio.git"
+  },
+  "devDependencies": {
+    "electron": "^45.3.1"
+  },
+  "dependencies": {
+    "@fontsource/plus-jakarta-sans": "^5.3.0"
+  },
+  "build": {
+    "appId": "de.relatio.app",
+    "productName": "Relatio",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "build/icon.png",
+      "node_modules/@fontsource/plus-jakarta-sans/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "Relatio-${version}-portable.exe"
+    },
+    "nsis": {
+      "artifactName": "Relatio-Setup-${version}.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
