@@ -324,6 +324,8 @@
           <span class="zoom-val" id="zoom-val">100%</span>
           <button class="tool" id="t-zin" title="Vergrößern">${I.plus}</button>
           <button class="tool" id="t-fit" title="Ansicht einpassen (F)">${I.fit}</button>
+          <span class="tool-sep"></span>
+          <button class="tool" id="t-auto" title="Diagramm automatisch anordnen (L)">${I.layout}</button>
         </div>
         <button class="btn btn-dark" id="ed-pdf">${I.pdf} PDF exportieren</button>
       </div>
@@ -380,6 +382,7 @@
     $('#t-zin').onclick = () => zoomCenter(1.2);
     $('#t-zout').onclick = () => zoomCenter(1 / 1.2);
     $('#t-fit').onclick = fitView;
+    $('#t-auto').onclick = autoArrange;
 
     const cv = $('#cv');
     cv.addEventListener('pointerdown', onDown);
@@ -413,6 +416,17 @@
     updateUndoButtons();
     if (fit) requestAnimationFrame(fitView);
     else applyView();
+  }
+
+  function autoArrange() {
+    if (!E.p.entities.length) return toast('Das Diagramm ist noch leer.', { err: true });
+    pushUndo();
+    R.autoLayout(E.p);
+    renderCanvas();
+    renderPanel();
+    changed();
+    fitView();
+    toast('Diagramm angeordnet', { action: { label: 'Rückgängig', fn: undo } });
   }
 
   function setMode(mode) {
@@ -879,6 +893,7 @@
         <kbd>Entf</kbd><span>Auswahl löschen</span>
         <kbd>Strg Z</kbd><span>Rückgängig</span>
         <kbd>F</kbd><span>Ansicht einpassen</span>
+        <kbd>L</kbd><span>Automatisch anordnen</span>
         <kbd>T</kbd><span>Diagramm / Tabellen</span>
         <kbd>Mausrad</kbd><span>Zoomen</span>
         <kbd>Ziehen</kbd><span>Fläche verschieben</span>
@@ -1345,6 +1360,7 @@
     else if (k === 'e') setTool('entity');
     else if (k === 'r') setTool('rel');
     else if (k === 'g') setTool('gen');
+    else if (k === 'l') autoArrange();
     else if (k === 'f') fitView();
     else if (k === '+' || k === '=') zoomCenter(1.2);
     else if (k === '-') zoomCenter(1 / 1.2);

@@ -28,6 +28,7 @@
 - **Tabellen-Ansicht** – mit <kbd>T</kbd> wird das Diagramm automatisch ins Relationenmodell übersetzt: Primär- und Fremdschlüssel, Verknüpfungstabellen für N:M, schwache Entitäten und drei Abbildungen für Generalisierungen (Tabelle je Typ, eine Tabelle, nur Untertypen).
 - **SQL-Export** – `CREATE TABLE`-Skript für PostgreSQL, MySQL, SQLite oder SQL Server kopieren oder als `.sql` speichern.
 - **PDF-Export** – gestochen scharfes Vektor-PDF in A4/A3 quer oder hoch oder exakt auf Diagrammgröße, optional mit Titelzeile – wahlweise mit Diagramm, Tabellen oder beidem.
+- **Automatisch anordnen** – ein Klick (oder <kbd>L</kbd>) räumt das ganze Diagramm auf: verbundene Entitäten rücken zusammen, nichts überlappt, Untertypen stehen unter ihrem Obertyp.
 - **Komfort** – Undo/Redo, Zoom & Pan, Raster-Ausrichtung, Auto-Speichern, Suche, Import/Export als `.relatio`-Datei, rekursive Beziehungen, schwache Entitäten.
 - **Leichtgewichtig** – kein Framework, keine Cloud, kein Account. Vanilla JS + SVG, Projekte liegen lokal als JSON.
 
@@ -48,8 +49,8 @@ Lade im [neuesten Release](https://github.com/noahzmm/relatio/releases/latest) e
 
 | Datei | Beschreibung |
 | --- | --- |
-| `Relatio-Setup-1.2.0.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
-| `Relatio-1.2.0-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
+| `Relatio-Setup-1.3.0.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
+| `Relatio-1.3.0-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
 
 > Die Builds sind nicht signiert. Windows SmartScreen zeigt beim ersten Start einen Hinweis – über **Weitere Informationen → Trotzdem ausführen** startet die App.
 

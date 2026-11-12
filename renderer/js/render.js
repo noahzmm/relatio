@@ -241,10 +241,20 @@
       if (typeof gen.x === 'number' && typeof gen.y === 'number') hub = { x: gen.x, y: gen.y };
       else {
         const mx = kids.reduce((s, g) => s + g.cx, 0) / kids.length;
-        const top = Math.min(...kids.map((g) => g.y));
-        const bottom = Math.max(...kids.map((g) => g.y + g.h));
+        // bei Chen die Attribut-Ellipsen mitzählen, damit das Dreieck nicht darin landet
+        const kidIds = (gen.children || []).filter((id) => id !== gen.parent && geoms.has(id));
+        const ext = (id, g) => {
+          const ags = attrGeoms.get(id) || [];
+          return {
+            top: Math.min(g.y, ...ags.map((a) => a.cy - a.h / 2)),
+            bottom: Math.max(g.y + g.h, ...ags.map((a) => a.cy + a.h / 2)),
+          };
+        };
+        const pe = ext(gen.parent, P);
+        const top = Math.min(...kidIds.map((id) => ext(id, geoms.get(id)).top));
+        const bottom = Math.max(...kidIds.map((id) => ext(id, geoms.get(id)).bottom));
         if (top > P.y + P.h + 40) hub = { x: P.cx, y: (P.y + P.h + top) / 2 };
-        else if (bottom < P.y - 40) hub = { x: P.cx, y: (P.y + bottom) / 2 };
+        else if (bottom < pe.top - 40) hub = { x: P.cx, y: (pe.top + bottom) / 2 };
         else {
           const my = kids.reduce((s, g) => s + g.cy, 0) / kids.length;
           const pe = clipRect(P, mx, my);
@@ -595,6 +605,233 @@
     });
     return s;
   }
+
+  /**
+   * Ordnet das ganze Diagramm automatisch an (verändert das Projekt).
+   * Kräftebasiert: Beziehungen ziehen Entitäten zusammen, Abstände verhindern Überlappung,
+   * Untertypen landen unter ihrem Obertyp. Manuelle Positionen von Rauten/Attributen werden zurückgesetzt.
+   */
+  R.autoLayout = function (project) {
+    const notation = project.notation;
+    const chen = isChen(notation);
+    const ents = project.entities;
+    if (!ents.length) return;
+
+    for (const e of ents) for (const a of e.attributes || []) delete a.dx, delete a.dy;
+    for (const r of project.relationships) {
+      delete r.x;
+      delete r.y;
+      delete r.bdx;
+      delete r.bdy;
+      for (const a of r.attributes || []) delete a.dx, delete a.dy;
+    }
+    for (const g of project.generalizations || []) delete g.x, delete g.y;
+
+    // Platzbedarf je Entität (bei Chen inkl. Attribut-Ellipsen)
+    const N = ents.map((e) => {
+      const g = entityGeom({ ...e, x: 0, y: 0 }, notation);
+      let [l, t, r, b] = [0, 0, g.w, g.h];
+      if (chen)
+        for (const ag of chenAttrGeoms(e, g)) {
+          l = Math.min(l, ag.cx - ag.w / 2);
+          t = Math.min(t, ag.cy - ag.h / 2);
+          r = Math.max(r, ag.cx + ag.w / 2);
+          b = Math.max(b, ag.cy + ag.h / 2);
+        }
+      return { e, ox: l, oy: t, W: r - l, H: b - t, x: 0, y: 0 };
+    });
+    const idx = new Map(ents.map((e, i) => [e.id, i]));
+
+    // Kanten: Beziehungen (mit Platz für Raute bzw. Beschriftung) und Generalisierungen
+    const edges = [];
+    const seen = new Set();
+    for (const r of project.relationships) {
+      const a = idx.get(r.from);
+      const b = idx.get(r.to);
+      if (a === undefined || b === undefined || a === b) continue;
+      const k = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const extra = (r.attributes || []).length ? 60 : 0;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      edges.push({ a, b, gap: (chen ? 190 : 130) + extra });
+    }
+    const gens = [];
+    for (const g of project.generalizations || []) {
+      const p = idx.get(g.parent);
+      if (p === undefined) continue;
+      for (const c of g.children || []) {
+        const ci = idx.get(c);
+        if (ci === undefined || ci === p) continue;
+        gens.push({ p, c: ci });
+        edges.push({ a: p, b: ci, gap: chen ? 170 : 110 });
+      }
+    }
+
+    // Startpositionen: Breitensuche ab der Entität mit den meisten Verbindungen, im Raster
+    const deg = N.map(() => 0);
+    const adj = N.map(() => []);
+    for (const ed of edges) {
+      deg[ed.a]++;
+      deg[ed.b]++;
+      adj[ed.a].push(ed.b);
+      adj[ed.b].push(ed.a);
+    }
+    // Jede Entität in eine freie Rasterzelle direkt neben ihrem Nachbarn (Untertypen bevorzugt darunter),
+    // so entstehen keine Ketten, die quer durch andere Entitäten laufen.
+    const isSub = new Set(gens.map((g) => `${g.p}>${g.c}`));
+    const cellW = Math.max(...N.map((n) => n.W)) + (chen ? 190 : 130);
+    const cellH = Math.max(...N.map((n) => n.H)) + (chen ? 170 : 110);
+    const occ = new Map();
+    const cell = N.map(() => null);
+    const put = (i, cx, cy) => {
+      cell[i] = [cx, cy];
+      occ.set(`${cx},${cy}`, i);
+    };
+    const SIDE = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+    const BELOW = [[0, 1], [1, 1], [-1, 1], [1, 0], [-1, 0], [2, 1], [-2, 1]];
+    const free = (from, dirs) => {
+      for (let r = 1; r < 6; r++) for (const [dx, dy] of dirs) if (!occ.has(`${from[0] + dx * r},${from[1] + dy * r}`)) return [from[0] + dx * r, from[1] + dy * r];
+      return null;
+    };
+    const byDeg = N.map((_, i) => i).sort((x, y) => deg[y] - deg[x] || x - y);
+    let nextCol = 0;
+    for (const s of byDeg) {
+      if (cell[s]) continue;
+      // neue Zusammenhangskomponente rechts neben die bisherigen
+      const used = [...occ.keys()].map((k) => +k.split(',')[0]);
+      nextCol = used.length ? Math.max(...used) + 2 : 0;
+      put(s, nextCol, 0);
+      const q = [s];
+      while (q.length) {
+        const i = q.shift();
+        for (const j of adj[i].slice().sort((x, y) => deg[y] - deg[x] || x - y)) {
+          if (cell[j]) continue;
+          const dirs = isSub.has(`${i}>${j}`) ? BELOW : isSub.has(`${j}>${i}`) ? BELOW.map(([x, y]) => [x, -y]) : SIDE;
+          const c = free(cell[i], dirs) || [nextCol + occ.size, 0];
+          put(j, c[0], c[1]);
+          q.push(j);
+        }
+      }
+    }
+    N.forEach((n, i) => {
+      n.x = cell[i][0] * cellW;
+      n.y = cell[i][1] * cellH;
+    });
+
+    // Abstand zwischen Mittelpunkt und Rechteckrand in Richtung u
+    const reach = (n, ux, uy) => Math.min(ux ? n.W / 2 / Math.abs(ux) : Infinity, uy ? n.H / 2 / Math.abs(uy) : Infinity);
+    const minGap = chen ? 70 : 60;
+
+    const ITER = 450;
+    for (let it = 0; it < ITER; it++) {
+      const cool = 1 - it / ITER;
+      const fx = N.map(() => 0);
+      const fy = N.map(() => 0);
+      // Federn entlang der Kanten
+      for (const ed of edges) {
+        const A = N[ed.a];
+        const B = N[ed.b];
+        const dx = B.x - A.x;
+        const dy = B.y - A.y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        const ux = dx / d;
+        const uy = dy / d;
+        const target = reach(A, ux, uy) + reach(B, ux, uy) + ed.gap;
+        const f = (d - target) * 0.08;
+        fx[ed.a] += ux * f;
+        fy[ed.a] += uy * f;
+        fx[ed.b] -= ux * f;
+        fy[ed.b] -= uy * f;
+      }
+      // Abstoßung zwischen allen Paaren
+      for (let i = 0; i < N.length; i++)
+        for (let j = i + 1; j < N.length; j++) {
+          const A = N[i];
+          const B = N[j];
+          let dx = B.x - A.x;
+          let dy = B.y - A.y;
+          if (!dx && !dy) dx = 1;
+          const d = Math.hypot(dx, dy);
+          const ux = dx / d;
+          const uy = dy / d;
+          const sep = d - reach(A, ux, uy) - reach(B, ux, uy); // Lücke zwischen den Rechtecken
+          let f = 0;
+          if (sep < minGap) f = (minGap - sep) * 0.4;
+          f += 1800 / Math.max(d, 50); // schwache Fernwirkung, damit lose Teile nicht kleben
+          fx[i] -= ux * f;
+          fy[i] -= uy * f;
+          fx[j] += ux * f;
+          fy[j] += uy * f;
+        }
+      // Untertypen unter den Obertyp
+      for (const { p, c } of gens) {
+        const P = N[p];
+        const C = N[c];
+        const want = P.y + P.H / 2 + C.H / 2 + (chen ? 170 : 110);
+        if (C.y < want) {
+          const f = (want - C.y) * 0.35;
+          fy[c] += f;
+          fy[p] -= f * 0.5;
+        }
+        // Untertypen zur Spalte des Obertyps ziehen (Geschwister stoßen sich gegenseitig ab)
+        const fxg = (P.x - C.x) * 0.03;
+        fx[c] += fxg;
+        fx[p] -= fxg * 0.5;
+      }
+      // leichte Schwerkraft zur Mitte, damit das Diagramm kompakt bleibt
+      const mx = N.reduce((s, n) => s + n.x, 0) / N.length;
+      const my = N.reduce((s, n) => s + n.y, 0) / N.length;
+      const maxStep = 60 * cool + 2;
+      N.forEach((n, i) => {
+        fx[i] += (mx - n.x) * 0.004;
+        fy[i] += (my - n.y) * 0.006; // etwas stärker vertikal: Diagramme eher breit als hoch
+        const l = Math.hypot(fx[i], fy[i]);
+        const s = l > maxStep ? maxStep / l : 1;
+        n.x += fx[i] * s;
+        n.y += fy[i] * s;
+      });
+    }
+
+    // Restliche Überlappungen achsenweise auflösen
+    for (let pass = 0; pass < 120; pass++) {
+      let moved = false;
+      // harte Regel: Untertyp unterhalb des Obertyps
+      for (const { p, c } of gens) {
+        const want = N[p].y + N[p].H / 2 + N[c].H / 2 + (chen ? 150 : 90);
+        if (N[c].y < want - 0.5) {
+          N[c].y = want;
+          moved = true;
+        }
+      }
+      for (let i = 0; i < N.length; i++)
+        for (let j = i + 1; j < N.length; j++) {
+          const A = N[i];
+          const B = N[j];
+          const ox = (A.W + B.W) / 2 + minGap - Math.abs(B.x - A.x);
+          const oy = (A.H + B.H) / 2 + minGap - Math.abs(B.y - A.y);
+          if (ox <= 0 || oy <= 0) continue;
+          moved = true;
+          if (ox < oy) {
+            const s = (B.x >= A.x ? 1 : -1) * (ox / 2 + 1);
+            A.x -= s;
+            B.x += s;
+          } else {
+            const s = (B.y >= A.y ? 1 : -1) * (oy / 2 + 1);
+            A.y -= s;
+            B.y += s;
+          }
+        }
+      if (!moved) break;
+    }
+
+    // Übernehmen: linke obere Ecke auf (60, 60), Raster 10
+    const minX = Math.min(...N.map((n) => n.x - n.W / 2));
+    const minY = Math.min(...N.map((n) => n.y - n.H / 2));
+    for (const n of N) {
+      n.e.x = Math.round((n.x - n.W / 2 - minX + 60 - n.ox) / 10) * 10;
+      n.e.y = Math.round((n.y - n.H / 2 - minY + 60 - n.oy) / 10) * 10;
+    }
+  };
 
   /** Vollständiges, eigenständiges SVG (für PDF-Export und Vorschaubilder). */
   R.diagramSvg = function (project, { padding = 30 } = {}) {
