@@ -1,7 +1,7 @@
 {
   "name": "relatio",
   "productName": "Relatio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ER-Diagramme einfach zeichnen – Chen, (min,max), Crow's Foot und UML, mit PDF-Export.",
   "main": "main.js",
   "scripts": {

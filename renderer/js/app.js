@@ -244,7 +244,9 @@
       openProject(p);
     };
     $('#np-create', m.el).onclick = create;
-    $('#np-name', m.el).onkeydown = (e) => e.key === 'Enter' && create();
+    $('#np-name', m.el).onkeydown = (e) => {
+      if (e.key === 'Enter') create();
+    };
     setTimeout(() => $('#np-name', m.el).focus(), 50);
   }
 
