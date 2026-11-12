@@ -30,6 +30,20 @@
       a.click();
       return a.download;
     },
+    async saveText({ name, content }) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+      a.download = name;
+      a.click();
+      return a.download;
+    },
+    async saveText({ name, content }) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+      a.download = name;
+      a.click();
+      return a.download;
+    },
     async importFile() {
       return null;
     },
@@ -57,7 +71,7 @@
 
   // Einstellungen (pro Rechner)
   const SETTINGS_KEY = 'relatio.settings';
-  const defaults = { userName: '', snap: true, pdfFormat: 'a4-landscape', pdfHeader: true };
+  const defaults = { userName: '', snap: true, pdfFormat: 'a4-landscape', pdfHeader: true, pdfContent: 'diagram', sqlDialect: 'postgres' };
   R.settings = Object.assign({}, defaults, safeParse(localStorage.getItem(SETTINGS_KEY)));
   R.saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(R.settings));
 

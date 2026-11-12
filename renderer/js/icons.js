@@ -15,6 +15,7 @@
     cursor: p('<path d="M5 3.5 18.5 11l-6 1.6L9.6 18.8z"/>'),
     entity: p('<rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M3.5 10.5h17"/>'),
     relation: p('<path d="M12 4.5 19.5 12 12 19.5 4.5 12z"/>'),
+    gen: p('<path d="M12 3.5 16 9H8z"/><path d="M12 9v4M6 17v-4h12v4"/><rect x="3.5" y="17" width="5" height="3.5" rx="1"/><rect x="15.5" y="17" width="5" height="3.5" rx="1"/>'),
     undo: p('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
     redo: p('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
     minus: p('<path d="M5 12h14"/>'),

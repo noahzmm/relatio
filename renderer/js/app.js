@@ -255,6 +255,7 @@
     p: null,
     view: { x: 0, y: 0, k: 1 },
     tool: 'select',
+    mode: 'diagram', // 'diagram' | 'tables'
     sel: null,
     undo: [],
     redo: [],
@@ -269,12 +270,15 @@
   const snapV = (v) => (R.settings.snap ? Math.round(v / 10) * 10 : Math.round(v));
   const entity = (id) => E.p.entities.find((e) => e.id === id);
   const relation = (id) => E.p.relationships.find((r) => r.id === id);
+  const generalization = (id) => E.p.generalizations.find((g) => g.id === id);
+  const PICK_TOOLS = ['rel', 'gen']; // Werkzeuge, die zwei Entitäten nacheinander anklicken
 
   async function openProject(idOrProject) {
     try {
       const p = typeof idOrProject === 'string' ? await R.api.load(idOrProject) : idOrProject;
       p.entities = p.entities || [];
       p.relationships = p.relationships || [];
+      p.generalizations = p.generalizations || [];
       if (!R.NOTATIONS[p.notation]) p.notation = 'chen';
       state.current = p;
       Object.assign(E, { p, tool: 'select', sel: null, undo: [], redo: [], relFrom: null, hover: null, drag: null, dirty: false });
@@ -296,10 +300,15 @@
           <div class="date"><span class="pill ${n.color}">${esc(n.name)}</span><span class="save-state" id="save-state">Gespeichert</span></div>
           <h1 id="ed-name">${esc(E.p.name)}</h1>
         </div>
-        <div class="toolbar">
+        <div class="seg" id="ed-mode">
+          <button data-mode="diagram" title="Diagramm (T)">${I.diagram} Diagramm</button>
+          <button data-mode="tables" title="Tabellen (T)">${I.layout} Tabellen</button>
+        </div>
+        <div class="toolbar" id="ed-tools">
           <button class="tool" data-tool="select" title="Auswählen & verschieben (V)">${I.cursor}</button>
           <button class="tool" data-tool="entity" title="Entität hinzufügen (E)">${I.entity}</button>
           <button class="tool" data-tool="rel" title="Beziehung hinzufügen (R)">${I.relation}</button>
+          <button class="tool" data-tool="gen" title="Generalisierung hinzufügen (G)">${I.gen}</button>
           <span class="tool-sep"></span>
           <button class="tool" id="t-undo" title="Rückgängig (Strg+Z)">${I.undo}</button>
           <button class="tool" id="t-redo" title="Wiederholen (Strg+Y)">${I.redo}</button>
@@ -316,11 +325,48 @@
           <svg class="canvas" id="cv"><g id="vp"></g></svg>
           <div id="cv-overlay"></div>
         </div>
+        <div class="tables-wrap" id="tw" hidden>
+          <div class="tables-bar">
+            <div><b>Relationenmodell</b><span class="hint">Automatisch aus dem Diagramm abgeleitet – Änderungen machst du im Diagramm oder rechts im Panel.</span></div>
+            <div class="tables-actions">
+              <select class="input" id="sql-dialect" title="SQL-Dialekt">${Object.entries(R.SQL_DIALECTS)
+                .map(([id, d]) => `<option value="${id}" ${id === R.settings.sqlDialect ? 'selected' : ''}>${esc(d.name)}</option>`)
+                .join('')}</select>
+              <button class="btn btn-light btn-sm" id="sql-copy">SQL kopieren</button>
+              <button class="btn btn-light btn-sm" id="sql-save">${I.download} SQL speichern</button>
+            </div>
+          </div>
+          <div class="tables-grid" id="tables"></div>
+        </div>
         <aside class="panel" id="panel"></aside>
       </div>`;
 
     $('#ed-back').onclick = showHome;
     $('#ed-pdf').onclick = pdfModal;
+    $$('[data-mode]').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+    $('#sql-dialect').onchange = (e) => {
+      R.settings.sqlDialect = e.target.value;
+      R.saveSettings();
+    };
+    $('#sql-copy').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(R.toSql(E.p, R.settings.sqlDialect));
+        toast('SQL in die Zwischenablage kopiert');
+      } catch (err) {
+        toast(`Kopieren fehlgeschlagen: ${err.message}`, { err: true });
+      }
+    };
+    $('#sql-save').onclick = async () => {
+      const file = await R.api.saveText({ name: `${E.p.name || 'Diagramm'}.sql`, content: R.toSql(E.p, R.settings.sqlDialect), filter: { name: 'SQL', extensions: ['sql'] } });
+      if (file) toast('SQL gespeichert', { action: R.isDesktop ? { label: 'Öffnen', fn: () => R.api.openPath(file) } : null });
+    };
+    $('#tables').addEventListener('click', (ev) => {
+      const card = ev.target.closest('[data-entity], [data-rel]');
+      if (!card) return;
+      E.sel = card.dataset.entity ? { kind: 'entity', id: card.dataset.entity } : { kind: 'rel', id: card.dataset.rel };
+      renderCanvas();
+      renderPanel();
+    });
     $$('[data-tool]').forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
     $('#t-undo').onclick = undo;
     $('#t-redo').onclick = redo;
@@ -334,7 +380,7 @@
     cv.addEventListener('pointerup', onUp);
     cv.addEventListener('pointercancel', onUp);
     cv.addEventListener('pointerleave', () => {
-      if (E.tool === 'rel' && !E.drag) {
+      if (PICK_TOOLS.includes(E.tool) && !E.drag) {
         E.pointer = null;
         E.hover = null;
         renderCanvas();
@@ -355,18 +401,51 @@
     panel.addEventListener('keydown', onPanelKey);
 
     setTool(E.tool);
+    setMode(E.mode);
     renderPanel();
     updateUndoButtons();
     if (fit) requestAnimationFrame(fitView);
     else applyView();
   }
 
+  function setMode(mode) {
+    E.mode = mode;
+    const tables = mode === 'tables';
+    $$('[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+    $('#cw').hidden = tables;
+    $('#tw').hidden = !tables;
+    $('#ed-tools').hidden = tables;
+    if (tables) {
+      if (E.tool !== 'select') setTool('select');
+      renderTables();
+    } else requestAnimationFrame(applyView);
+  }
+
+  function renderTables() {
+    const box = $('#tables');
+    if (!box || E.mode !== 'tables') return;
+    const tables = R.toRelational(E.p);
+    if (!tables.length) {
+      box.innerHTML = `<div class="canvas-empty" style="position:static;grid-column:1/-1;padding:60px 0"><div><b>Noch keine Tabellen</b>Lege im Diagramm Entitäten an – die Tabellen entstehen automatisch.</div></div>`;
+      return;
+    }
+    box.innerHTML = R.tablesHtml(tables, { selectable: true });
+    const s = E.sel;
+    if (s) {
+      const r = s.kind === 'rel' && relation(s.id);
+      // bei 1:N-Beziehungen die Tabellen beider Entitäten markieren
+      const ids = s.kind === 'rel' ? (r ? [r.from, r.to] : []) : [s.id];
+      $$('[data-entity]', box).forEach((c) => c.classList.toggle('selected', ids.includes(c.dataset.entity)));
+      $$('[data-rel]', box).forEach((c) => c.classList.toggle('selected', s.kind === 'rel' && c.dataset.rel === s.id));
+    }
+  }
+
   function setTool(t) {
-    E.tool = t;
-    if (t !== 'rel') {
+    if (t !== E.tool || !PICK_TOOLS.includes(t)) {
       E.relFrom = null;
       E.hover = null;
     }
+    E.tool = t;
     $$('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     const cv = $('#cv');
     if (cv) cv.setAttribute('class', `canvas mode-${t}`);
@@ -376,17 +455,20 @@
   function renderCanvas() {
     const vp = $('#vp');
     if (!vp || !E.p) return;
-    const pending = E.tool === 'rel' && E.relFrom && E.pointer ? { from: E.relFrom, x: E.pointer.x, y: E.pointer.y } : null;
+    const pending = PICK_TOOLS.includes(E.tool) && E.relFrom && E.pointer ? { from: E.relFrom, x: E.pointer.x, y: E.pointer.y } : null;
     vp.innerHTML = R.renderDiagram(E.p, { sel: E.sel, hover: E.hover, pending }).svg;
     applyView();
     let ov = '';
     if (E.tool === 'entity') ov = `<div class="canvas-hint">Klicke auf die Fläche, um eine Entität zu platzieren · Esc bricht ab</div>`;
     else if (E.tool === 'rel')
       ov = `<div class="canvas-hint">${E.relFrom ? 'Jetzt die zweite Entität anklicken (gleiche Entität = rekursiv)' : 'Erste Entität der Beziehung anklicken'} · Esc bricht ab</div>`;
+    else if (E.tool === 'gen')
+      ov = `<div class="canvas-hint">${E.relFrom ? `Jetzt den Untertyp von „${esc(entity(E.relFrom)?.name || '')}“ anklicken` : 'Zuerst den Obertyp anklicken'} · Esc bricht ab</div>`;
     else if (!E.p.entities.length)
       ov = `<div class="canvas-empty"><div><b>Leere Zeichenfläche</b>Doppelklick oder <kbd>E</kbd> für eine neue Entität,<br/><kbd>R</kbd> verbindet zwei Entitäten mit einer Beziehung.</div></div>`;
     ov += `<div class="notation-badge"><span class="pill ${R.NOTATIONS[E.p.notation].color}">${esc(R.NOTATIONS[E.p.notation].name)}-Notation</span></div>`;
     $('#cv-overlay').innerHTML = ov;
+    renderTables();
   }
 
   function applyView() {
@@ -454,13 +536,15 @@
     }
     if (ev.button !== 0) return;
     if (E.tool === 'entity') return addEntity(w.x, w.y);
-    if (E.tool === 'rel') {
-      if (hit && hit.kind !== 'rel') {
+    if (PICK_TOOLS.includes(E.tool)) {
+      if (hit && (hit.kind === 'entity' || hit.kind === 'attr')) {
         if (!E.relFrom) {
           E.relFrom = hit.id;
           E.pointer = w;
           renderCanvas();
-        } else addRelationship(E.relFrom, hit.id);
+        } else if (E.tool === 'rel') addRelationship(E.relFrom, hit.id);
+        else if (hit.id === E.relFrom) toast('Ein Untertyp muss eine andere Entität sein.', { err: true });
+        else addGeneralization(E.relFrom, hit.id);
       } else setTool('select');
       return;
     }
@@ -479,6 +563,9 @@
       } else if (hit.kind === 'rel' && L.chen) {
         const lr = L.rels.find((r) => r.rel.id === hit.id);
         E.drag = lr ? { kind: 'rel', id: hit.id, start: w, orig: { x: lr.d.cx, y: lr.d.cy }, moved: false } : null;
+      } else if (hit.kind === 'gen') {
+        const lg = L.gens.find((g) => g.gen.id === hit.id);
+        E.drag = lg ? { kind: 'gen', id: hit.id, start: w, orig: { x: lg.hub.x, y: lg.hub.y }, moved: false } : null;
       } else E.drag = null;
       renderCanvas();
       if (JSON.stringify(E.sel) !== prev) renderPanel();
@@ -495,10 +582,10 @@
 
   function onMove(ev) {
     const d = E.drag;
-    if (!d && E.tool === 'rel') {
+    if (!d && PICK_TOOLS.includes(E.tool)) {
       E.pointer = toWorld(ev);
       const hit = hitOf(ev);
-      const hov = hit && hit.kind !== 'rel' ? hit.id : null;
+      const hov = hit && (hit.kind === 'entity' || hit.kind === 'attr') ? hit.id : null;
       if (E.relFrom || hov !== E.hover) {
         E.hover = hov;
         renderCanvas();
@@ -527,6 +614,10 @@
       const r = relation(d.id);
       r.x = snapV(d.orig.x + dx);
       r.y = snapV(d.orig.y + dy);
+    } else if (d.kind === 'gen') {
+      const g = generalization(d.id);
+      g.x = snapV(d.orig.x + dx);
+      g.y = snapV(d.orig.y + dy);
     } else if (d.kind === 'attr') {
       const a = entity(d.id).attributes.find((x) => x.id === d.attr);
       a.dx = Math.round(d.orig.x + dx);
@@ -553,6 +644,7 @@
       const w = toWorld(ev);
       return addEntity(w.x, w.y);
     }
+    if (hit.kind === 'gen') return;
     const target = hit.kind === 'rel' ? '#f-rname' : hit.kind === 'attr' ? `.attr-row[data-attr="${hit.attr}"] input` : '#f-ename';
     const el = $(target);
     if (el) {
@@ -563,8 +655,8 @@
 
   // ---------- Änderungen / Undo ----------
   function snapshot() {
-    const { entities, relationships, name, description, notation } = E.p;
-    return JSON.stringify({ entities, relationships, name, description, notation });
+    const { entities, relationships, generalizations, name, description, notation } = E.p;
+    return JSON.stringify({ entities, relationships, generalizations, name, description, notation });
   }
   function pushUndo(snap) {
     E.undo.push(snap || snapshot());
@@ -667,6 +759,35 @@
     focusField('#f-rname');
   }
 
+  function addGeneralization(parent, child) {
+    pushUndo();
+    const gs = E.p.generalizations;
+    // Kreise verhindern: child darf kein (indirekter) Obertyp von parent sein
+    const supers = (id, seen = new Set()) => {
+      for (const g of gs) if (g.children.includes(id) && !seen.has(g.parent)) seen.add(g.parent), supers(g.parent, seen);
+      return seen;
+    };
+    if (supers(parent).has(child)) {
+      E.undo.pop();
+      return toast('Das würde einen Kreis in der Vererbung erzeugen.', { err: true });
+    }
+    let g = gs.find((x) => x.parent === parent);
+    if (g && g.children.includes(child)) {
+      E.undo.pop();
+      toast('Diese Entität ist schon Untertyp.');
+    } else if (g) g.children.push(child);
+    else {
+      g = { id: R.uid(), parent, children: [child], total: false, disjoint: true, mapping: 'subtables' };
+      gs.push(g);
+    }
+    E.sel = { kind: 'gen', id: g.id };
+    // Werkzeug bleibt aktiv, damit weitere Untertypen direkt angeklickt werden können
+    E.hover = null;
+    renderCanvas();
+    renderPanel();
+    changed();
+  }
+
   function deleteSelection() {
     const s = E.sel;
     if (!s) return;
@@ -674,6 +795,13 @@
     if (s.kind === 'entity') {
       E.p.entities = E.p.entities.filter((e) => e.id !== s.id);
       E.p.relationships = E.p.relationships.filter((r) => r.from !== s.id && r.to !== s.id);
+      E.p.generalizations = E.p.generalizations
+        .filter((g) => g.parent !== s.id)
+        .map((g) => ({ ...g, children: g.children.filter((c) => c !== s.id) }))
+        .filter((g) => g.children.length);
+      E.sel = null;
+    } else if (s.kind === 'gen') {
+      E.p.generalizations = E.p.generalizations.filter((g) => g.id !== s.id);
       E.sel = null;
     } else if (s.kind === 'attr') {
       const e = entity(s.id);
@@ -705,6 +833,7 @@
     const s = E.sel;
     if (s && (s.kind === 'entity' || s.kind === 'attr') && entity(s.id)) panel.innerHTML = panelEntity(entity(s.id));
     else if (s && s.kind === 'rel' && relation(s.id)) panel.innerHTML = panelRel(relation(s.id));
+    else if (s && s.kind === 'gen' && generalization(s.id)) panel.innerHTML = panelGen(generalization(s.id));
     else panel.innerHTML = panelProject();
   }
 
@@ -725,10 +854,12 @@
       <div class="shortcuts">
         <kbd>E</kbd><span>Entität platzieren</span>
         <kbd>R</kbd><span>Beziehung verbinden</span>
+        <kbd>G</kbd><span>Generalisierung (IS-A)</span>
         <kbd>V</kbd><span>Auswählen & verschieben</span>
         <kbd>Entf</kbd><span>Auswahl löschen</span>
         <kbd>Strg Z</kbd><span>Rückgängig</span>
         <kbd>F</kbd><span>Ansicht einpassen</span>
+        <kbd>T</kbd><span>Diagramm / Tabellen</span>
         <kbd>Mausrad</kbd><span>Zoomen</span>
         <kbd>Ziehen</kbd><span>Fläche verschieben</span>
       </div>
@@ -785,6 +916,42 @@
       <button class="btn danger-btn btn-sm" data-act="del-rel">${I.trash} Beziehung löschen</button>`;
   }
 
+  function panelGen(g) {
+    const P = entity(g.parent);
+    const free = E.p.entities.filter((e) => e.id !== g.parent && !g.children.includes(e.id));
+    const kids = g.children
+      .map(entity)
+      .filter(Boolean)
+      .map(
+        (e) => `<div class="attr-row"><span class="gen-kid">${esc(e.name)}</span><button class="mini-btn del" data-act="gen-del-kid" data-id="${esc(e.id)}" title="Untertyp entfernen">${I.x}</button></div>`
+      )
+      .join('');
+    const m = R.GEN_MAPPINGS[g.mapping] || R.GEN_MAPPINGS.subtables;
+    return `
+      <div class="panel-head"><h4>Generalisierung</h4><span class="pill">IS-A</span></div>
+      <label class="field"><span>Obertyp</span><select data-f="gparent">${E.p.entities
+        .map((e) => `<option value="${esc(e.id)}" ${e.id === g.parent ? 'selected' : ''}>${esc(e.name)}</option>`)
+        .join('')}</select></label>
+      <div class="sub-head"><div class="label">Untertypen</div><span class="pill">${g.children.length}</span></div>
+      ${kids}
+      ${free.length ? `<select class="input gen-add" data-f="gadd"><option value="">+ Untertyp hinzufügen …</option>${free.map((e) => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>` : ''}
+      <div class="card-box" style="margin-top:16px">
+        <div class="q">Muss jede Instanz von <b>${esc(P ? P.name : '')}</b> zu einem Untertyp gehören?</div>
+        <div class="presets" style="margin:0"><button data-act="gen-total" data-v="0" class="${g.total ? '' : 'active'}">partiell</button><button data-act="gen-total" data-v="1" class="${g.total ? 'active' : ''}">total</button></div>
+      </div>
+      <div class="card-box">
+        <div class="q">Darf eine Instanz zu mehreren Untertypen gehören?</div>
+        <div class="presets" style="margin:0"><button data-act="gen-disj" data-v="1" class="${g.disjoint !== false ? 'active' : ''}">disjunkt</button><button data-act="gen-disj" data-v="0" class="${g.disjoint === false ? 'active' : ''}">überlappend</button></div>
+      </div>
+      <label class="field"><span>Abbildung in Tabellen</span><select data-f="gmap">${Object.entries(R.GEN_MAPPINGS)
+        .map(([id, x]) => `<option value="${id}" ${id === g.mapping ? 'selected' : ''}>${esc(x.name)}</option>`)
+        .join('')}</select></label>
+      <p class="hint" style="margin-top:-6px">${esc(m.desc)}</p>
+      ${typeof g.x === 'number' ? `<button class="link-btn" data-act="gen-center">Position zurücksetzen</button>` : ''}
+      <p class="hint">Tipp: Mit dem Werkzeug <kbd>G</kbd> erst den Obertyp, dann nacheinander die Untertypen anklicken.</p>
+      <button class="btn btn-sm danger-btn" data-act="del-gen">${I.trash} Generalisierung löschen</button>`;
+  }
+
   function onPanelInput(ev) {
     const t = ev.target;
     if (t.matches('select, input[type="checkbox"]')) return;
@@ -811,9 +978,23 @@
   function onPanelChange(ev) {
     const t = ev.target;
     const f = t.dataset.f;
-    if (!['weak', 'notation', 'rfrom', 'rto', 'cfrom', 'cto'].includes(f)) return;
+    if (!['weak', 'notation', 'rfrom', 'rto', 'cfrom', 'cto', 'gparent', 'gadd', 'gmap'].includes(f)) return;
+    if (f === 'gadd' && !t.value) return;
     pushUndo();
     if (f === 'weak') entity(E.sel.id).weak = t.checked;
+    else if (f === 'gparent' || f === 'gadd' || f === 'gmap') {
+      const g = generalization(E.sel.id);
+      if (f === 'gmap') g.mapping = t.value;
+      else if (f === 'gadd') g.children.push(t.value);
+      else {
+        g.parent = t.value;
+        g.children = g.children.filter((c) => c !== t.value);
+        delete g.x;
+        delete g.y;
+        if (!g.children.length) E.p.generalizations = E.p.generalizations.filter((x) => x !== g);
+        if (!g.children.length) E.sel = null;
+      }
+    }
     else if (f === 'notation') {
       E.p.notation = t.value;
       changed();
@@ -877,7 +1058,20 @@
       const r = relation(s.id);
       delete r.x;
       delete r.y;
-    } else if (act === 'del-entity' || act === 'del-rel') {
+    } else if (act === 'gen-total' || act === 'gen-disj') {
+      generalization(s.id)[act === 'gen-total' ? 'total' : 'disjoint'] = b.dataset.v === '1';
+    } else if (act === 'gen-center') {
+      const g = generalization(s.id);
+      delete g.x;
+      delete g.y;
+    } else if (act === 'gen-del-kid') {
+      const g = generalization(s.id);
+      g.children = g.children.filter((c) => c !== b.dataset.id);
+      if (!g.children.length) {
+        E.p.generalizations = E.p.generalizations.filter((x) => x !== g);
+        E.sel = null;
+      }
+    } else if (act === 'del-entity' || act === 'del-rel' || act === 'del-gen') {
       E.undo.pop(); // deleteSelection legt selbst einen Undo-Schritt an
       return deleteSelection();
     }
@@ -900,6 +1094,12 @@
     const d = R.diagramSvg(E.p, { padding: 12 });
     if (!d) return toast('Das Diagramm ist noch leer.', { err: true });
     let fmt = R.settings.pdfFormat;
+    let content = E.mode === 'tables' ? 'tables' : R.settings.pdfContent || 'diagram';
+    const contents = [
+      ['diagram', 'Diagramm'],
+      ['tables', 'Tabellen'],
+      ['both', 'Beides'],
+    ];
     const ratio = Math.max(0.4, Math.min(2.2, d.height / d.width));
     const formats = [
       ['a4-landscape', 'A4 Querformat', '297 × 210 mm', 40, 28],
@@ -909,7 +1109,12 @@
     ];
     const m = modal(
       `<h3>Als PDF exportieren</h3>
-      <p class="lead">Das Diagramm wird als Vektor-PDF gespeichert – gestochen scharf in jeder Größe.</p>
+      <p class="lead">Wird als Vektor-PDF gespeichert – gestochen scharf in jeder Größe.</p>
+      <div class="label" style="margin-bottom:10px">Inhalt</div>
+      <div class="presets" id="pdf-content">${contents
+        .map(([id, t]) => `<button class="${id === content ? 'active' : ''}" data-content="${id}">${t}</button>`)
+        .join('')}</div>
+      <div class="label" style="margin:6px 0 10px">Format</div>
       <div class="choice-list">${formats
         .map(
           ([id, t, sub, w, h]) =>
@@ -928,11 +1133,20 @@
           $$('[data-fmt]', m.el).forEach((x) => x.classList.toggle('active', x === b));
         })
     );
+    $$('[data-content]', m.el).forEach(
+      (b) =>
+        (b.onclick = () => {
+          content = b.dataset.content;
+          $$('[data-content]', m.el).forEach((x) => x.classList.toggle('active', x === b));
+        })
+    );
     $('#pdf-go', m.el).onclick = async () => {
       const header = $('#pdf-head', m.el).checked;
       R.settings.pdfFormat = fmt;
       R.settings.pdfHeader = header;
+      R.settings.pdfContent = content;
       R.saveSettings();
+      const tables = content === 'diagram' ? null : R.tablesHtml(R.toRelational(E.p));
       m.close();
       const n = R.NOTATIONS[E.p.notation];
       try {
@@ -944,6 +1158,9 @@
           subtitle: `${n.name}-Notation · ${E.p.entities.length} Entitäten · ${E.p.relationships.length} Beziehungen · ${fmtLong(Date.now())}`,
           format: fmt,
           header,
+          diagram: content !== 'tables',
+          tables,
+          tablesCss: R.TABLES_CSS,
         });
         if (file) toast('PDF gespeichert', { action: { label: 'Öffnen', fn: () => R.api.openPath(file) } });
       } catch (err) {
@@ -960,12 +1177,14 @@
       ['⬭', 'Attribut, unterstrichen = Primärschlüssel'],
       ['1 · N · M', 'Kardinalität (Verhältnis)'],
       ['══', 'Doppellinie = totale Teilnahme'],
+      ['△', 'Generalisierung (IS-A), d = disjunkt, o = überlappend'],
     ],
     minmax: [
       ['(0,1)', 'nimmt höchstens einmal teil'],
       ['(1,1)', 'nimmt genau einmal teil'],
       ['(0,n)', 'nimmt beliebig oft teil'],
       ['(1,n)', 'nimmt mindestens einmal teil'],
+      ['△', 'Generalisierung (IS-A)'],
     ],
     crow: [
       ['—||', 'genau eine'],
@@ -973,6 +1192,7 @@
       ['—|<', 'eine oder mehrere'],
       ['—o<', 'beliebig viele'],
       ['PK', 'Primärschlüssel'],
+      ['—▷', 'Generalisierung zum Obertyp'],
     ],
     uml: [
       ['1', 'genau eine'],
@@ -980,6 +1200,7 @@
       ['1..*', 'eine oder mehrere'],
       ['0..*', 'beliebig viele'],
       ['{PK}', 'Primärschlüssel'],
+      ['—▷', 'Generalisierung zum Obertyp'],
     ],
   };
 
@@ -1078,9 +1299,12 @@
       }
       return;
     }
+    if (k === 't') return setMode(E.mode === 'tables' ? 'diagram' : 'tables');
+    if (E.mode === 'tables') return;
     if (k === 'v') setTool('select');
     else if (k === 'e') setTool('entity');
     else if (k === 'r') setTool('rel');
+    else if (k === 'g') setTool('gen');
     else if (k === 'f') fitView();
     else if (k === '+' || k === '=') zoomCenter(1.2);
     else if (k === '-') zoomCenter(1 / 1.2);

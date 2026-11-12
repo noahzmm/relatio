@@ -44,6 +44,16 @@ app.whenReady().then(async () => {
       })()`);
       fs.writeFileSync(path.join(out, `export-${notation}.pdf`), await renderPdf(payload));
       if (notation === 'crow') fs.writeFileSync(path.join(out, `export-${notation}-fit.pdf`), await renderPdf({ ...payload, format: 'fit', header: false }));
+      if (notation === 'chen') {
+        const tables = await js(`R.tablesHtml(R.toRelational(R._debug.E.p))`);
+        const css = await js('R.TABLES_CSS');
+        fs.writeFileSync(path.join(out, 'export-tables.pdf'), await renderPdf({ ...payload, diagram: false, tables, tablesCss: css }));
+        fs.writeFileSync(path.join(out, 'export-both-fit.pdf'), await renderPdf({ ...payload, format: 'fit', tables, tablesCss: css }));
+        await js(`document.querySelector('[data-mode="tables"]').click()`);
+        await wait(300);
+        fs.writeFileSync(path.join(out, 'editor-tables.png'), (await win.webContents.capturePage()).toPNG());
+        await js(`document.querySelector('[data-mode="diagram"]').click()`);
+      }
     }
     console.log('SMOKE OK', out);
   } catch (err) {

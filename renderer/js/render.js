@@ -219,8 +219,32 @@
       }
     }
 
+    // Generalisierungen: Verteilerpunkt (hub) zwischen Obertyp und Untertypen
+    const gens = [];
+    for (const gen of project.generalizations || []) {
+      const P = geoms.get(gen.parent);
+      const kids = (gen.children || []).filter((id) => id !== gen.parent).map((id) => geoms.get(id)).filter(Boolean);
+      if (!P || !kids.length) continue;
+      let hub;
+      if (typeof gen.x === 'number' && typeof gen.y === 'number') hub = { x: gen.x, y: gen.y };
+      else {
+        const mx = kids.reduce((s, g) => s + g.cx, 0) / kids.length;
+        const top = Math.min(...kids.map((g) => g.y));
+        const bottom = Math.max(...kids.map((g) => g.y + g.h));
+        if (top > P.y + P.h + 40) hub = { x: P.cx, y: (P.y + P.h + top) / 2 };
+        else if (bottom < P.y - 40) hub = { x: P.cx, y: (P.y + bottom) / 2 };
+        else {
+          const my = kids.reduce((s, g) => s + g.cy, 0) / kids.length;
+          const pe = clipRect(P, mx, my);
+          hub = { x: pe.x + (mx - pe.x) * 0.45, y: pe.y + (my - pe.y) * 0.45 };
+        }
+      }
+      const pEnd = clipRect(P, hub.x, hub.y);
+      gens.push({ gen, P, kids, hub, pEnd, kidEnds: kids.map((g) => clipRect(g, hub.x, hub.y)) });
+    }
+
     // Bounding Box
-    const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    const bb ={ minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
     const grow = (x1, y1, x2, y2) => {
       bb.minX = Math.min(bb.minX, x1);
       bb.minY = Math.min(bb.minY, y1);
@@ -240,8 +264,9 @@
       }
       for (const e of r.ends) grow(e.p.x - 40, e.p.y - 26, e.p.x + 40, e.p.y + 26);
     }
+    for (const g of gens) grow(g.hub.x - 60, g.hub.y - 40, g.hub.x + 60, g.hub.y + 40);
     const bbox = Number.isFinite(bb.minX) ? bb : null;
-    return { notation, chen, geoms, attrGeoms, rels, bbox };
+    return { notation, chen, geoms, attrGeoms, rels, gens, bbox };
   };
 
   // ---------- SVG-Bausteine ----------
@@ -361,6 +386,63 @@
               `</g>`
           );
         }
+      }
+    }
+
+    // Generalisierungen
+    for (const G of L.gens) {
+      const selected = sel && sel.kind === 'gen' && sel.id === G.gen.id;
+      const stroke = selected ? ACCENT : INK;
+      const { hub, pEnd } = G;
+      const id = esc(G.gen.id);
+      const u = unit(pEnd.x - hub.x, pEnd.y - hub.y); // Richtung zum Obertyp
+      const n = { x: -u.y, y: u.x };
+      let ls = '';
+      let hit = '';
+      if (chen) {
+        const TW = 74;
+        const TH = 54;
+        const apex = { x: hub.x + u.x * (TH / 2), y: hub.y + u.y * (TH / 2) };
+        const base = { x: hub.x - u.x * (TH / 2), y: hub.y - u.y * (TH / 2) };
+        if (G.gen.total) ls += line(apex, pEnd, { stroke, width: 6.4 }) + line(apex, pEnd, { stroke: '#fff', width: 2.2 });
+        else ls += line(apex, pEnd, { stroke, width: 1.8 });
+        hit += line(apex, pEnd, { stroke: 'transparent', width: 14, extra: 'class="hit"' });
+        G.kids.forEach((kg, i) => {
+          ls += line(base, G.kidEnds[i], { stroke, width: 1.8 });
+          hit += line(base, G.kidEnds[i], { stroke: 'transparent', width: 14, extra: 'class="hit"' });
+        });
+        relLines.push(`<g data-kind="gen" data-id="${id}">${ls}${hit}</g>`);
+        const b1 = { x: base.x + n.x * (TW / 2), y: base.y + n.y * (TW / 2) };
+        const b2 = { x: base.x - n.x * (TW / 2), y: base.y - n.y * (TW / 2) };
+        const lp = perpUp(u);
+        diamonds.push(
+          `<g data-kind="gen" data-id="${id}" class="node">` +
+            `<path class="body" d="M${n1(apex.x)},${n1(apex.y)} L${n1(b1.x)},${n1(b1.y)} L${n1(b2.x)},${n1(b2.y)} Z" fill="#fff" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>` +
+            text(hub.x - u.x * 6, hub.y - u.y * 6, 'IS-A', { size: 11.5, weight: 800, fill: INK }) +
+            text(hub.x + lp.x * (TW / 2 + 6), hub.y + lp.y * (TW / 2 + 6), G.gen.disjoint === false ? 'o' : 'd', { size: 14, weight: 700, fill: stroke, halo: true }) +
+            `</g>`
+        );
+      } else {
+        // UML-Stil: Linien treffen sich im Verteiler, hohles Dreieck am Obertyp
+        G.kids.forEach((kg, i) => {
+          ls += line(G.kidEnds[i], hub, { stroke, width: 1.6 });
+          hit += line(G.kidEnds[i], hub, { stroke: 'transparent', width: 14, extra: 'class="hit"' });
+        });
+        const AH = 16;
+        const tip = pEnd;
+        const back = { x: tip.x - u.x * AH, y: tip.y - u.y * AH };
+        ls += line(hub, back, { stroke, width: 1.6 });
+        hit += line(hub, tip, { stroke: 'transparent', width: 14, extra: 'class="hit"' });
+        ls += `<path d="M${n1(tip.x)},${n1(tip.y)} L${n1(back.x + n.x * 9)},${n1(back.y + n.y * 9)} L${n1(back.x - n.x * 9)},${n1(back.y - n.y * 9)} Z" fill="#fff" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round"/>`;
+        relLines.push(`<g data-kind="gen" data-id="${id}">${ls}${hit}</g>`);
+        const lab = `{${G.gen.disjoint === false ? 'überlappend' : 'disjunkt'}, ${G.gen.total ? 'total' : 'partiell'}}`;
+        diamonds.push(
+          `<g data-kind="gen" data-id="${id}" class="node">` +
+            `<circle class="body" cx="${n1(hub.x)}" cy="${n1(hub.y)}" r="${selected ? 5 : 4}" fill="${stroke}"/>` +
+            `<circle cx="${n1(hub.x)}" cy="${n1(hub.y)}" r="12" fill="transparent"/>` +
+            text(hub.x + 14, hub.y - 12, lab, { size: 11.5, weight: 600, fill: selected ? ACCENT : MUTED, anchor: 'start', halo: true, italic: true }) +
+            `</g>`
+        );
       }
     }
 

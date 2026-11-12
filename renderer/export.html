@@ -14,10 +14,15 @@
     .brand i { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: #141416; color: #fff; font-style: normal; font-size: 12px; font-weight: 800; }
     .art { flex: 1; min-height: 0; display: flex; }
     .art svg { width: 100%; height: 100%; }
+    .tables { page: tables; font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif; color: #141416; }
+    .tables .head { margin-bottom: 16px; }
+    .tables-grid { display: grid; gap: 12px; align-items: start; }
   </style>
+  <style id="tables-style"></style>
 </head>
 <body>
   <div class="page" id="page"></div>
+  <div class="tables" id="tables" hidden></div>
   <script>
     const SIZES = { 'a4-landscape': [1123, 794], 'a4-portrait': [794, 1123], 'a3-landscape': [1587, 1123], 'a3-portrait': [1123, 1587] };
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -30,15 +35,36 @@
         w = Math.ceil(o.width + pad * 2);
         h = Math.ceil(o.height + pad * 2 + headH);
       }
-      document.getElementById('page-style').textContent = `@page { size: ${w}px ${h}px; margin: 0 }`;
+      const head = (sub) =>
+        `<div class="head"><div><div class="title">${esc(o.title)}</div><div class="sub">${esc(sub)}</div></div><div class="brand"><i>R</i>Relatio</div></div>`;
+      // Tabellenseiten: gleiches Format wie das Diagramm, bei "An Inhalt anpassen" A4 hoch
+      const [tw, th] = SIZES[o.format] || SIZES['a4-portrait'];
+      const withDiagram = o.diagram !== false;
+      document.getElementById('page-style').textContent =
+        `@page { size: ${w}px ${h}px; margin: 0 } @page tables { size: ${tw}px ${th}px; margin: ${pad}px }`;
+      const tables = document.getElementById('tables');
+      if (o.tables) {
+        document.getElementById('tables-style').textContent = o.tablesCss || '';
+        tables.hidden = false;
+        tables.innerHTML =
+          (o.header ? head(`Relationenmodell · ${o.subtitle}`) : '') +
+          `<div class="tables-grid" style="grid-template-columns: repeat(${tw > th ? 3 : 2}, minmax(0, 1fr))">${o.tables}</div>`;
+      }
       const page = document.getElementById('page');
+      const fonts = async () => {
+        await Promise.all(['400', '500', '600', '700', '800'].map((wt) => document.fonts.load(`${wt} 14px "Plus Jakarta Sans"`).catch(() => {})));
+        await document.fonts.ready;
+      };
+      if (!withDiagram) {
+        page.remove();
+        await fonts();
+        return { width: tw, height: th };
+      }
       page.style.width = w + 'px';
       page.style.height = h - 1 + 'px';
       page.style.padding = pad + 'px';
       page.innerHTML =
-        (o.header
-          ? `<div class="head"><div><div class="title">${esc(o.title)}</div><div class="sub">${esc(o.subtitle)}</div></div><div class="brand"><i>R</i>Relatio</div></div>`
-          : '') + `<div class="art">${o.svg}</div>`;
+        (o.header ? head(o.subtitle) : '') + `<div class="art">${o.svg}</div>`;
       const svg = page.querySelector('svg');
       svg.removeAttribute('width');
       svg.removeAttribute('height');
@@ -47,8 +73,7 @@
       svg.style.maxWidth = o.width * 1.5 + 'px';
       svg.style.maxHeight = o.height * 1.5 + 'px';
       svg.style.margin = 'auto';
-      await Promise.all(['400', '500', '600', '700', '800'].map((wt) => document.fonts.load(`${wt} 14px "Plus Jakarta Sans"`).catch(() => {})));
-      await document.fonts.ready;
+      await fonts();
       return { width: w, height: h };
     };
   </script>

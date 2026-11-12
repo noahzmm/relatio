@@ -122,6 +122,18 @@ function safeName(name) {
   return (String(name || 'Diagramm').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Diagramm').slice(0, 80);
 }
 
+ipcMain.handle('file:saveText', async (_e, { name, content, filter }) => {
+  const ext = path.extname(String(name)) || '.txt';
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Speichern unter',
+    defaultPath: safeName(path.basename(String(name), ext)) + ext,
+    filters: filter ? [{ name: String(filter.name), extensions: filter.extensions.map(String) }] : [],
+  });
+  if (canceled || !filePath) return null;
+  await fs.writeFile(filePath, String(content), 'utf8');
+  return filePath;
+});
+
 ipcMain.handle('pdf:export', async (_e, payload) => {
   const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
     title: 'Als PDF exportieren',
