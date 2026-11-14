@@ -21,7 +21,9 @@
 
 - **Notation pro Projekt** – beim Anlegen wählst du zwischen **Chen**, **(min,max)**, **Crow's Foot** und **UML** (mit Live-Vorschau). Umschalten ist später jederzeit möglich, das Diagramm wird automatisch neu gezeichnet.
 - **Schnell zeichnen** – Entitäten mit Doppelklick oder <kbd>E</kbd>, Beziehungen mit <kbd>R</kbd> und zwei Klicks, alles per Drag & Drop verschiebbar.
-- **Attribute & Schlüssel** – Attribute mit Datentyp, Primärschlüssel per Klick; in Chen als Ellipsen (frei verschiebbar), in Crow's Foot/UML als Liste.
+- **Farbschemata** – sieben Schemata (Klassisch, Graphit, Ozean, Wald, Beere, Abendrot, Bunt) direkt auf der Zeichenfläche wählbar; gilt pro Projekt, auch für Vorschau und PDF.
+- **Saubere Linien** – in Crow's Foot und UML verlaufen Beziehungen rechtwinklig mit runden Ecken und teilen sich den Platz an einer Kastenseite; Generalisierungen werden als Baum gezeichnet.
+- **Attribute & Schlüssel** – Attribute mit Datentyp (auch lange wie `DECIMAL(10,2)`), Primärschlüssel per Klick; in Chen als Ellipsen (frei verschiebbar), in Crow's Foot/UML als Liste.
 - **Attribute an Beziehungen** – z. B. Menge oder Datum direkt an der Beziehung: in Chen als Ellipsen an der Raute, in Crow's Foot/UML als Kasten an der Linie (wie eine Assoziationsklasse). In den Tabellen landen sie in der Verknüpfungstabelle bzw. bei der Fremdschlüssel-Seite.
 - **Kardinalitäten ohne Rätselraten** – Presets 1:1 · 1:N · N:M oder pro Ende „genau eine / keine oder eine / eine oder mehrere / beliebig viele“. Die Darstellung passt sich der Notation an (1/N/M, (0,n), Krähenfuß, 0..*).
 - **Generalisierung (IS-A)** – mit <kbd>G</kbd> Obertyp und Untertypen verbinden, total/partiell und disjunkt/überlappend festlegen. Chen zeigt das IS-A-Dreieck, Crow's Foot/UML den Vererbungspfeil.
@@ -29,7 +31,7 @@
 - **SQL-Export** – `CREATE TABLE`-Skript für PostgreSQL, MySQL, SQLite oder SQL Server kopieren oder als `.sql` speichern.
 - **PDF-Export** – gestochen scharfes Vektor-PDF in A4/A3 quer oder hoch oder exakt auf Diagrammgröße, optional mit Titelzeile – wahlweise mit Diagramm, Tabellen oder beidem.
 - **Automatisch anordnen** – ein Klick (oder <kbd>L</kbd>) räumt das ganze Diagramm auf: verbundene Entitäten rücken zusammen, nichts überlappt, Untertypen stehen unter ihrem Obertyp.
-- **Komfort** – Undo/Redo, Zoom & Pan, Raster-Ausrichtung, Auto-Speichern, Suche, Import/Export als `.relatio`-Datei, rekursive Beziehungen, schwache Entitäten.
+- **Komfort** – Undo/Redo, Zoom & Pan, Raster-Ausrichtung, Auto-Speichern, Suche, Import/Export als `.relatio`-Datei, rekursive Beziehungen, schwache Entitäten (in Chen mit doppelter Raute für die identifizierende Beziehung und gestricheltem Teilschlüssel).
 - **Leichtgewichtig** – kein Framework, keine Cloud, kein Account. Vanilla JS + SVG, Projekte liegen lokal als JSON.
 
 <p align="center">
@@ -49,8 +51,8 @@ Lade im [neuesten Release](https://github.com/noahzmm/relatio/releases/latest) e
 
 | Datei | Beschreibung |
 | --- | --- |
-| `Relatio-Setup-1.3.1.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
-| `Relatio-1.3.1-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
+| `Relatio-Setup-1.4.0.exe` | Installer mit Startmenü- und Desktop-Verknüpfung |
+| `Relatio-1.4.0-portable.exe` | Ohne Installation starten, z. B. vom USB-Stick |
 
 > Die Builds sind nicht signiert. Windows SmartScreen zeigt beim ersten Start einen Hinweis – über **Weitere Informationen → Trotzdem ausführen** startet die App.
 
@@ -60,6 +62,7 @@ Lade im [neuesten Release](https://github.com/noahzmm/relatio/releases/latest) e
 | --- | --- |
 | <kbd>V</kbd> | Auswählen & verschieben |
 | <kbd>E</kbd> / Doppelklick | Entität platzieren |
+| Doppelklick auf ein Element | Namen bearbeiten |
 | <kbd>R</kbd> | Beziehung zwischen zwei Entitäten |
 | <kbd>Entf</kbd> | Auswahl löschen |
 | <kbd>Strg</kbd>+<kbd>Z</kbd> / <kbd>Strg</kbd>+<kbd>Y</kbd> | Rückgängig / Wiederholen |

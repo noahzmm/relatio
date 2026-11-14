@@ -37,13 +37,6 @@
       a.click();
       return a.download;
     },
-    async saveText({ name, content }) {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
-      a.download = name;
-      a.click();
-      return a.download;
-    },
     async importFile() {
       return null;
     },

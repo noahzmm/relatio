@@ -69,7 +69,13 @@
   }
 
   function thumbSvg(p, padding = 16) {
-    const d = R.diagramSvg(p, { padding });
+    // ein beschädigtes Projekt darf die Übersicht nicht lahmlegen
+    let d = null;
+    try {
+      d = R.diagramSvg(p, { padding });
+    } catch (err) {
+      console.warn('Vorschau fehlgeschlagen', err);
+    }
     return d ? d.svg : `<span class="thumb-empty">${I.diagram}</span>`;
   }
 
@@ -88,7 +94,13 @@
     leaveEditor();
     state.route = 'home';
     setNav('home');
-    state.projects = await R.api.list();
+    state.projects = (await R.api.list()).flatMap((p) => {
+      try {
+        return [R.normalizeProject(p)];
+      } catch {
+        return [];
+      }
+    });
     const name = R.settings.userName || state.osName || 'du';
     const today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
     const ents = state.projects.reduce((s, p) => s + (p.entities || []).length, 0);
@@ -183,11 +195,11 @@
     try {
       const p = await R.api.importFile();
       if (!p) return;
-      if (!Array.isArray(p.entities) || !Array.isArray(p.relationships)) throw new Error('Keine gültige Relatio-Datei');
+      if (!p || !Array.isArray(p.entities) || !Array.isArray(p.relationships)) throw new Error('Keine gültige Relatio-Datei');
+      R.normalizeProject(p);
       p.id = R.uid();
-      if (!R.NOTATIONS[p.notation]) p.notation = 'chen';
       p.updatedAt = Date.now();
-      p.createdAt = p.createdAt || p.updatedAt;
+      p.createdAt = typeof p.createdAt === 'number' ? p.createdAt : p.updatedAt;
       await R.api.save(p);
       toast('Projekt importiert');
       showHome();
@@ -283,10 +295,7 @@
   async function openProject(idOrProject) {
     try {
       const p = typeof idOrProject === 'string' ? await R.api.load(idOrProject) : idOrProject;
-      p.entities = p.entities || [];
-      p.relationships = p.relationships || [];
-      p.generalizations = p.generalizations || [];
-      if (!R.NOTATIONS[p.notation]) p.notation = 'chen';
+      R.normalizeProject(p);
       state.current = p;
       Object.assign(E, { p, tool: 'select', sel: null, undo: [], redo: [], relFrom: null, hover: null, drag: null, dirty: false });
       showEditor(true);
@@ -333,6 +342,8 @@
         <div class="canvas-wrap" id="cw">
           <svg class="canvas" id="cv"><g id="vp"></g></svg>
           <div id="cv-overlay"></div>
+          <button class="theme-chip" id="t-theme" title="Farbschema des Diagramms wählen"></button>
+          <div class="theme-pop" id="theme-pop" hidden></div>
         </div>
         <div class="tables-wrap" id="tw" hidden>
           <div class="tables-bar">
@@ -383,6 +394,11 @@
     $('#t-zout').onclick = () => zoomCenter(1 / 1.2);
     $('#t-fit').onclick = fitView;
     $('#t-auto').onclick = autoArrange;
+    $('#t-theme').onclick = () => toggleThemes();
+    $('#theme-pop').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-theme]');
+      if (b) setTheme(b.dataset.theme);
+    });
 
     const cv = $('#cv');
     cv.addEventListener('pointerdown', onDown);
@@ -417,6 +433,44 @@
     if (fit) requestAnimationFrame(fitView);
     else applyView();
   }
+
+  // ---------- Farbschema ----------
+  const themeSwatch = (t) =>
+    `<span class="theme-sw"><i style="background:${t.head}"></i><i style="background:${t.entFill};border-color:${t.entStroke}"></i><i style="background:${t.relFill};border-color:${t.relStroke}"></i><i style="background:${t.attrFill};border-color:${t.attrStroke}"></i></span>`;
+  function updateThemeChip() {
+    const chip = $('#t-theme');
+    if (!chip || chip.dataset.theme === (E.p.theme || 'classic')) return;
+    chip.dataset.theme = E.p.theme || 'classic';
+    const t = R.themeOf(E.p);
+    chip.innerHTML = `${themeSwatch(t)}<span>${esc(t.name)}</span>`;
+  }
+  function toggleThemes(open) {
+    const pop = $('#theme-pop');
+    if (!pop) return;
+    const show = open === undefined ? pop.hidden : open;
+    pop.hidden = !show;
+    $('#t-theme').classList.toggle('active', show);
+    if (!show) return;
+    pop.innerHTML =
+      `<div class="label">Farbschema</div>` +
+      R.THEME_ORDER.map((id) => {
+        const t = R.THEMES[id];
+        return `<button class="theme-opt ${id === (E.p.theme || 'classic') ? 'active' : ''}" data-theme="${id}">
+          ${themeSwatch(t)}<span>${esc(t.name)}</span>${I.check}</button>`;
+      }).join('');
+  }
+  function setTheme(id) {
+    if (!R.THEMES[id] || id === E.p.theme) return toggleThemes(false);
+    pushUndo();
+    E.p.theme = id;
+    renderCanvas();
+    changed();
+    toggleThemes(true); // offen lassen, damit man Schemata durchprobieren kann
+  }
+  document.addEventListener('pointerdown', (ev) => {
+    const pop = $('#theme-pop');
+    if (pop && !pop.hidden && !ev.target.closest('#theme-pop, #t-theme')) toggleThemes(false);
+  });
 
   function autoArrange() {
     if (!E.p.entities.length) return toast('Das Diagramm ist noch leer.', { err: true });
@@ -477,7 +531,7 @@
     const vp = $('#vp');
     if (!vp || !E.p) return;
     const pending = PICK_TOOLS.includes(E.tool) && E.relFrom && E.pointer ? { from: E.relFrom, x: E.pointer.x, y: E.pointer.y } : null;
-    vp.innerHTML = R.renderDiagram(E.p, { sel: E.sel, hover: E.hover, pending }).svg;
+    vp.innerHTML = R.renderDiagram(E.p, { sel: E.sel, hover: E.hover, pending, interactive: true }).svg;
     applyView();
     let ov = '';
     if (E.tool === 'entity') ov = `<div class="canvas-hint">Klicke auf die Fläche, um eine Entität zu platzieren · Esc bricht ab</div>`;
@@ -489,6 +543,7 @@
       ov = `<div class="canvas-empty"><div><b>Leere Zeichenfläche</b>Doppelklick oder <kbd>E</kbd> für eine neue Entität,<br/><kbd>R</kbd> verbindet zwei Entitäten mit einer Beziehung.</div></div>`;
     ov += `<div class="notation-badge"><span class="pill ${R.NOTATIONS[E.p.notation].color}">${esc(R.NOTATIONS[E.p.notation].name)}-Notation</span></div>`;
     $('#cv-overlay').innerHTML = ov;
+    updateThemeChip();
     renderTables();
   }
 
@@ -505,10 +560,12 @@
 
   function fitView() {
     const cv = $('#cv');
-    if (!cv) return;
+    if (!cv || !E.p) return;
     const bb = R.layout(E.p).bbox;
     const W = cv.clientWidth;
     const H = cv.clientHeight;
+    // Fläche noch nicht ausgemessen (z. B. Fenster gerade erst sichtbar): gleich noch einmal versuchen
+    if (W < 50 || H < 50) return void setTimeout(() => $('#cv') === cv && cv.clientWidth >= 50 && fitView(), 120);
     if (!bb) {
       E.view = { x: 0, y: 0, k: 1 };
       return applyView();
@@ -570,6 +627,12 @@
       return;
     }
     cv.setPointerCapture(ev.pointerId);
+    // Doppelklick selbst erkennen: beim ersten Klick wird das SVG neu aufgebaut,
+    // deshalb löst der Browser auf Elementen kein dblclick-Ereignis mehr aus.
+    const key = hit ? `${hit.kind}|${hit.id}|${hit.attr || ''}` : '';
+    const last = E.lastDown;
+    const dbl = !!hit && !!last && last.key === key && ev.timeStamp - last.t < 450 && Math.hypot(ev.clientX - last.x, ev.clientY - last.y) < 6;
+    E.lastDown = dbl ? null : { key, t: ev.timeStamp, x: ev.clientX, y: ev.clientY };
     if (hit) {
       const prev = JSON.stringify(E.sel);
       E.sel = hit.kind === 'attr' ? { kind: 'attr', id: hit.id, attr: hit.attr } : { kind: hit.kind === 'rbox' ? 'rel' : hit.kind, id: hit.id };
@@ -599,6 +662,10 @@
       } else E.drag = null;
       renderCanvas();
       if (JSON.stringify(E.sel) !== prev) renderPanel();
+      if (dbl) {
+        E.drag = null;
+        editHit(hit);
+      }
     } else {
       if (E.sel) {
         E.sel = null;
@@ -678,19 +745,19 @@
       const w = toWorld(ev);
       return addEntity(w.x, w.y);
     }
+    editHit(hit);
+  }
+
+  /** Springt ins passende Namensfeld des angeklickten Elements. */
+  function editHit(hit) {
     if (hit.kind === 'gen') return;
-    const target = hit.kind === 'rel' || hit.kind === 'rbox' ? '#f-rname' : hit.kind === 'attr' ? `.attr-row[data-attr="${hit.attr}"] input` : '#f-ename';
-    const el = $(target);
-    if (el) {
-      el.focus();
-      el.select();
-    }
+    focusField(hit.kind === 'rel' || hit.kind === 'rbox' ? '#f-rname' : hit.kind === 'attr' ? `.attr-row[data-attr="${hit.attr}"] input` : '#f-ename');
   }
 
   // ---------- Änderungen / Undo ----------
   function snapshot() {
-    const { entities, relationships, generalizations, name, description, notation } = E.p;
-    return JSON.stringify({ entities, relationships, generalizations, name, description, notation });
+    const { entities, relationships, generalizations, name, description, notation, theme } = E.p;
+    return JSON.stringify({ entities, relationships, generalizations, name, description, notation, theme: theme || 'classic' });
   }
   function pushUndo(snap) {
     E.undo.push(snap || snapshot());
@@ -701,11 +768,14 @@
   function restore(s) {
     const prevNotation = E.p.notation;
     Object.assign(E.p, JSON.parse(s));
-    if (E.sel && !entity(E.sel.id) && !relation(E.sel.id)) E.sel = null;
+    // Auswahl nur behalten, wenn es das Element nach dem Schritt noch gibt
+    const c = E.sel;
+    if (c && !(c.kind === 'gen' ? generalization(c.id) : c.kind === 'entity' ? entity(c.id) : c.kind === 'rel' ? relation(c.id) : owner(c.id))) E.sel = null;
     if (E.sel && E.sel.kind === 'attr' && !(owner(E.sel.id).attributes || []).some((a) => a.id === E.sel.attr)) E.sel = ownerSel(E.sel.id);
     changed();
     if (prevNotation !== E.p.notation) return showEditor(false);
-    $('#ed-name').textContent = E.p.name;
+    $('#ed-name').textContent = E.p.name || 'Unbenannt';
+    if ($('#theme-pop') && !$('#theme-pop').hidden) toggleThemes(true);
     renderCanvas();
     renderPanel();
   }
@@ -794,25 +864,18 @@
   }
 
   function addGeneralization(parent, child) {
-    pushUndo();
     const gs = E.p.generalizations;
-    // Kreise verhindern: child darf kein (indirekter) Obertyp von parent sein
-    const supers = (id, seen = new Set()) => {
-      for (const g of gs) if (g.children.includes(id) && !seen.has(g.parent)) seen.add(g.parent), supers(g.parent, seen);
-      return seen;
-    };
-    if (supers(parent).has(child)) {
-      E.undo.pop();
-      return toast('Das würde einen Kreis in der Vererbung erzeugen.', { err: true });
-    }
     let g = gs.find((x) => x.parent === parent);
-    if (g && g.children.includes(child)) {
-      E.undo.pop();
-      toast('Diese Entität ist schon Untertyp.');
-    } else if (g) g.children.push(child);
+    // erst prüfen, dann den Undo-Schritt anlegen – sonst geht bei einem Fehlversuch „Wiederholen“ verloren
+    if (R.hasGenCycle([...gs, { parent, children: [child] }])) return toast('Das würde einen Kreis in der Vererbung erzeugen.', { err: true });
+    if (g && g.children.includes(child)) toast('Diese Entität ist schon Untertyp.');
     else {
-      g = { id: R.uid(), parent, children: [child], total: false, disjoint: true, mapping: 'subtables' };
-      gs.push(g);
+      pushUndo();
+      if (g) g.children.push(child);
+      else {
+        g = { id: R.uid(), parent, children: [child], total: false, disjoint: true, mapping: 'subtables' };
+        gs.push(g);
+      }
     }
     E.sel = { kind: 'gen', id: g.id };
     // Werkzeug bleibt aktiv, damit weitere Untertypen direkt angeklickt werden können
@@ -902,13 +965,13 @@
   }
 
   function attrRows(o, { pk = true, pkTitle = 'Primärschlüssel' } = {}) {
-    const chen = R.isChen(E.p.notation);
+    // Der Typ ist in jeder Notation eingebbar: Chen zeigt ihn zwar nicht im Diagramm, Tabellen und SQL brauchen ihn aber
     return (o.attributes || [])
       .map(
         (a) => `<div class="attr-row ${E.sel.kind === 'attr' && E.sel.attr === a.id ? 'selected' : ''}" data-attr="${esc(a.id)}">
           ${pk ? `<button class="mini-btn pk ${a.pk ? 'on' : ''}" data-act="pk" title="${pkTitle}">${I.key}</button>` : ''}
-          <input data-af="name" value="${esc(a.name)}" placeholder="Attributname" maxlength="60" />
-          ${chen ? '' : `<input class="type" data-af="type" value="${esc(a.type)}" placeholder="Typ" maxlength="30" />`}
+          <input data-af="name" value="${esc(a.name)}" placeholder="Attributname" maxlength="200" title="${esc(a.name)}" />
+          <input class="type" data-af="type" value="${esc(a.type)}" placeholder="Typ" maxlength="200" title="${esc(a.type)}" />
           <button class="mini-btn del" data-act="del-attr" title="Attribut entfernen">${I.x}</button>
         </div>`
       )
@@ -925,8 +988,8 @@
       ${chen ? `<label class="check"><input type="checkbox" data-f="weak" ${e.weak ? 'checked' : ''} /> Schwache Entität (doppelter Rahmen)</label>` : ''}
       <div class="sub-head"><div class="label">Attribute</div><button class="link-btn" data-act="add-attr">${I.plus} Attribut</button></div>
       <div>${rows || '<p class="hint">Noch keine Attribute.</p>'}</div>
-      <p class="hint">Der Schlüssel markiert den Primärschlüssel${chen ? ' (unterstrichen)' : ''}. <b>Enter</b> legt direkt ein weiteres Attribut an.${
-        chen ? ' Attribut-Ellipsen kannst du auf der Fläche frei verschieben.' : ''
+      <p class="hint">Der Schlüssel markiert den Primärschlüssel${chen ? (e.weak ? ' (gestrichelt unterstrichen, weil Teilschlüssel)' : ' (unterstrichen)') : ''}. <b>Enter</b> legt direkt ein weiteres Attribut an.${
+        chen ? ' Der Typ erscheint in Tabellen und SQL. Attribut-Ellipsen kannst du auf der Fläche frei verschieben.' : ''
       }</p>
       ${moved ? `<button class="link-btn" data-act="reset-attrs">${I.layout} Attribute automatisch anordnen</button>` : ''}
       <button class="btn danger-btn btn-sm" data-act="del-entity">${I.trash} Entität löschen</button>`;
@@ -1032,6 +1095,15 @@
     const f = t.dataset.f;
     if (!['weak', 'notation', 'rfrom', 'rto', 'cfrom', 'cto', 'gparent', 'gadd', 'gmap'].includes(f)) return;
     if (f === 'gadd' && !t.value) return;
+    if (f === 'gadd' || f === 'gparent') {
+      // Kreise in der Vererbung verhindern (A Obertyp von B und B Obertyp von A)
+      const cur = generalization(E.sel.id);
+      const next = f === 'gadd' ? { ...cur, children: [...cur.children, t.value] } : { ...cur, parent: t.value, children: cur.children.filter((c) => c !== t.value) };
+      if (R.hasGenCycle(E.p.generalizations.map((g) => (g === cur ? next : g)))) {
+        toast('Das würde einen Kreis in der Vererbung erzeugen.', { err: true });
+        return renderPanel();
+      }
+    }
     pushUndo();
     if (f === 'weak') entity(E.sel.id).weak = t.checked;
     else if (f === 'gparent' || f === 'gadd' || f === 'gmap') {
@@ -1228,8 +1300,8 @@
   const LEGENDS = {
     chen: [
       ['▭', 'Entität (doppelt = schwache Entität)'],
-      ['◇', 'Beziehung'],
-      ['⬭', 'Attribut, unterstrichen = Primärschlüssel'],
+      ['◇', 'Beziehung (doppelt = identifiziert eine schwache Entität)'],
+      ['⬭', 'Attribut, unterstrichen = Primärschlüssel, gestrichelt = Teilschlüssel'],
       ['1 · N · M', 'Kardinalität (Verhältnis)'],
       ['══', 'Doppellinie = totale Teilnahme'],
       ['△', 'Generalisierung (IS-A), d = disjunkt, o = überlappend'],
@@ -1239,7 +1311,8 @@
       ['(1,1)', 'nimmt genau einmal teil'],
       ['(0,n)', 'nimmt beliebig oft teil'],
       ['(1,n)', 'nimmt mindestens einmal teil'],
-      ['△', 'Generalisierung (IS-A)'],
+      ['◇◇', 'doppelte Raute = identifiziert eine schwache Entität'],
+      ['△', 'Generalisierung (IS-A), Doppellinie = total'],
     ],
     crow: [
       ['—||', 'genau eine'],
@@ -1255,6 +1328,7 @@
       ['1..*', 'eine oder mehrere'],
       ['0..*', 'beliebig viele'],
       ['{PK}', 'Primärschlüssel'],
+      ['name ▸', 'Bezeichnung mit Leserichtung'],
       ['—▷', 'Generalisierung zum Obertyp'],
     ],
   };
@@ -1282,8 +1356,10 @@
     state.route = 'settings';
     setNav('settings');
     const st = R.settings;
+    // Electron trägt Name/Version der App in den User-Agent ein
+    const version = (navigator.userAgent.match(/Relatio\/([\d.]+)/) || [])[1] || '';
     view.innerHTML = `
-      <div class="page-head"><div><div class="date">Relatio 1.0</div><h1 class="hello"><span>Deine</span> Einstellungen</h1></div></div>
+      <div class="page-head"><div><div class="date">${esc(`Relatio ${version}`.trim())}</div><h1 class="hello"><span>Deine</span> Einstellungen</h1></div></div>
       <div class="scroll">
         <div class="settings-card">
           <h3>Allgemein</h3>
@@ -1320,7 +1396,8 @@
       if (ev.key === 'Escape') m.close();
       return;
     }
-    if (state.route !== 'editor' || !E.p) return;
+    if (state.route !== 'editor' || !E.p || typeof ev.key !== 'string') return;
+    if (ev.key === 'Escape' && $('#theme-pop') && !$('#theme-pop').hidden) return toggleThemes(false);
     const typing = ev.target instanceof Element && ev.target.matches('input, textarea, select');
     const ctrl = ev.ctrlKey || ev.metaKey;
     const k = ev.key.toLowerCase();

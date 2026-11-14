@@ -50,7 +50,8 @@ ipcMain.handle('projects:list', async () => {
   const out = [];
   for (const f of files) {
     try {
-      out.push(JSON.parse(await fs.readFile(path.join(projectsDir(), f), 'utf8')));
+      const p = JSON.parse(await fs.readFile(path.join(projectsDir(), f), 'utf8'));
+      if (p && typeof p === 'object' && ID_RE.test(String(p.id))) out.push(p);
     } catch {
       /* defekte Datei überspringen */
     }
@@ -62,13 +63,21 @@ ipcMain.handle('projects:load', async (_e, id) => {
   return JSON.parse(await fs.readFile(projectFile(id), 'utf8'));
 });
 
-ipcMain.handle('projects:save', async (_e, project) => {
-  await ensureDir();
-  const file = projectFile(project.id);
-  const tmp = `${file}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(project, null, 2), 'utf8');
-  await fs.rename(tmp, file);
-  return true;
+// Schreibvorgänge nacheinander ausführen: zwei gleichzeitige Speicherungen desselben Projekts
+// würden sich sonst die .tmp-Datei teilen. Beim Beenden wird auf die Warteschlange gewartet.
+let writeQueue = Promise.resolve();
+ipcMain.handle('projects:save', (_e, project) => {
+  const file = projectFile(project && project.id);
+  const data = JSON.stringify(project, null, 2);
+  const job = writeQueue.then(async () => {
+    await ensureDir();
+    const tmp = `${file}.tmp`;
+    await fs.writeFile(tmp, data, 'utf8');
+    await fs.rename(tmp, file);
+    return true;
+  });
+  writeQueue = job.catch(() => {});
+  return job;
 });
 
 ipcMain.handle('projects:delete', async (_e, id) => {
@@ -176,6 +185,10 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+app.on('window-all-closed', async () => {
+  if (process.platform === 'darwin') return;
+  // die letzte Speicherung (wird beim Schließen des Fensters ausgelöst) noch abschließen
+  await new Promise((r) => setTimeout(r, 150));
+  await writeQueue;
+  app.quit();
 });

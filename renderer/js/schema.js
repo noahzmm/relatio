@@ -164,11 +164,7 @@
 
     const rels = (p.relationships || []).filter((r) => byId.has(r.from) && byId.has(r.to));
     // identifizierende Beziehungen schwacher Entitäten zuerst, damit deren Schlüssel vollständig sind
-    const identifying = (r) => {
-      const a = byId.get(r.from);
-      const b = byId.get(r.to);
-      return (b.weak && !a.weak && r.cardFrom.max !== 'N') || (a.weak && !b.weak && r.cardTo.max !== 'N') ? 1 : 0;
-    };
+    const identifying = (r) => (R.isIdentifying(r, byId.get(r.from), byId.get(r.to)) ? 1 : 0);
     rels.sort((x, y) => identifying(y) - identifying(x));
 
     for (const r of rels) {
@@ -219,7 +215,7 @@
       else [child, parent, parentCard] = [A, B, r.cardTo];
       // steckt der Untertyp in der Tabelle des Obertyps, muss der Fremdschlüssel leer sein dürfen
       const folded = alias.has(child === A ? r.from : r.to);
-      addFk(child, parent, r, { nullable: folded || parentCard.min !== 1, unique: !aMany && !bMany, asPk: child.weak && !parent.weak && !folded });
+      addFk(child, parent, r, { nullable: folded || parentCard.min !== 1, unique: !aMany && !bMany, asPk: !!identifying(r) && child.weak && !parent.weak && !folded });
       // bei optionaler Teilnahme kann der Wert fehlen
       addRelAttrs(child, r, { nullable: folded || parentCard.min !== 1 });
       if ((r.attributes || []).some((a) => a.pk && clean(a.name))) child.notes.push(`Schlüssel an Attributen von „${clean(r.name) || 'Beziehung'}“ gelten nur bei N:M.`);
@@ -270,13 +266,16 @@
       const lines = t.columns.map((c) => `  ${q(c.name)} ${sqlType(c.type, dialect)}${c.nullable ? '' : ' NOT NULL'}`);
       const pk = t.columns.filter((c) => c.pk).map((c) => q(c.name));
       if (pk.length) lines.push(`  PRIMARY KEY (${pk.join(', ')})`);
-      t.columns.filter((c) => c.unique).forEach((c) => lines.push(`  UNIQUE (${q(c.name)})`));
       const groups = new Map();
       t.columns.filter((c) => c.fk).forEach((c) => groups.set(c.fk.group, [...(groups.get(c.fk.group) || []), c]));
+      // ein zusammengesetzter Fremdschlüssel ist nur als Ganzes eindeutig, nicht je Spalte
+      t.columns.filter((c) => c.unique && !c.fk).forEach((c) => lines.push(`  UNIQUE (${q(c.name)})`));
+      for (const cols of groups.values()) if (cols.every((c) => c.unique)) lines.push(`  UNIQUE (${cols.map((c) => q(c.name)).join(', ')})`);
       for (const cols of groups.values()) {
         const ref = cols[0].fk.table;
         const fk = `FOREIGN KEY (${cols.map((c) => q(c.name)).join(', ')}) REFERENCES ${q(ref)} (${cols.map((c) => q(c.fk.column)).join(', ')})`;
-        if (ref === t.name || created.has(ref)) lines.push(`  ${fk}`);
+        // SQLite kennt kein ALTER TABLE … ADD FOREIGN KEY, erlaubt dafür Verweise auf spätere Tabellen
+        if (dialect === 'sqlite' || ref === t.name || created.has(ref)) lines.push(`  ${fk}`);
         else deferred.push(`ALTER TABLE ${q(t.name)} ADD ${fk};`);
       }
       out.push(`CREATE TABLE ${q(t.name)} (\n${lines.join(',\n')}\n);`, '');

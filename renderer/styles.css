@@ -248,7 +248,22 @@ input, textarea, select { user-select: text; }
 .attr-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; padding: 3px; border-radius: 12px; }
 .attr-row.selected { background: #fff3f1; }
 .attr-row input { flex: 1; min-width: 0; height: 36px; border-radius: 10px; border: 1.5px solid var(--line); padding: 0 10px; outline: 0; background: #fff; }
-.attr-row input.type { flex: 0 0 82px; font-size: 12.5px; color: var(--ink-2); }
+.attr-row input.type { flex: 0 0 82px; font-size: 12.5px; color: var(--ink-2); transition: flex-basis 0.15s; }
+/* lange Typen (DECIMAL(10,2), ENUM-Listen) beim Bearbeiten breiter zeigen */
+.attr-row input.type:focus { flex-basis: 150px; }
+
+.theme-chip { position: absolute; right: 18px; bottom: 16px; height: 34px; padding: 0 14px 0 10px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow); border: 1.5px solid var(--line); display: inline-flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.theme-chip:hover, .theme-chip.active { border-color: var(--ink); }
+.theme-pop { position: absolute; bottom: 60px; right: 18px; z-index: 20; width: 220px; background: var(--surface); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 14px 8px 8px; animation: pop 0.16s; }
+.theme-pop .label { padding: 0 10px 8px; }
+.theme-opt { width: 100%; height: 40px; border-radius: 12px; display: flex; align-items: center; gap: 12px; padding: 0 10px; font-size: 13px; font-weight: 600; text-align: left; }
+.theme-opt:hover { background: var(--soft); }
+.theme-opt > span:nth-child(2) { flex: 1; }
+.theme-opt > svg { width: 16px; height: 16px; visibility: hidden; }
+.theme-opt.active > svg { visibility: visible; }
+.theme-sw { display: flex; flex: none; }
+.theme-sw i { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid transparent; margin-left: -5px; box-sizing: border-box; }
+.theme-sw i:first-child { margin-left: 0; }
 .attr-row input:focus { border-color: var(--ink); }
 .mini-btn { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: var(--muted-2); flex: none; }
 .mini-btn svg { width: 16px; height: 16px; }
